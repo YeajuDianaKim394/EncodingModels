@@ -5,16 +5,13 @@ Creates a csv and TextGrid file version of each transcript.
 Pipline
 -------
 
-TODO:  replace inaudible with silences?
-
 1. parse transcript file to determine each speaker and utterance
 1. Normalize utterances:
     0. remove brackets
     0. remove multiple white space
     0. remove whitespace before punctuation  (do a grep for these instances)
-    0. TODO replace numbers with text version?
 1. Tokenize utterances and segment into sentences
-    0. TODO todo consider using vocab from MFA dictionary?
+    0. uses vocab from MFA dictionary
 1. Normalize each token
     0. remove punctuation, white space, and lower case
 1. Save CSV with the following columns:
@@ -26,8 +23,6 @@ TODO:  replace inaudible with silences?
 https://github.com/facebookresearch/fairseq/blob/main/examples/mms/data_prep/text_normalization.py
 https://github.com/MontrealCorpusTools/Montreal-Forced-Aligner/blob/main/montreal_forced_aligner/corpus/multiprocessing.py#L260
 https://montreal-forced-aligner.readthedocs.io/en/latest/user_guide/dictionary.html#text-normalization-and-dictionary-lookup
-
-    - consider replacing numbers with the actual speech so we align better.
 """
 
 import re
@@ -63,13 +58,32 @@ def clean_utterance(text: str) -> str:
 def transcript2records(filepath: str, conv: int, first: str) -> list:
     """Function to process transcript into standard format.
 
+    Example transcript:
+    ```
+        Speaker 1 (00:01):
+        What do I value most in a friendship?...
+
+        (00:51):
+        But being funny is also always great...
+
+        Speaker 2 (01:06):
+        Um, I think w- when I think of a comfortable...
+
+        (01:50):
+        Um, I don't know, when I think of friendships...
+
+        Speaker 1 (02:25):
+        I definitely agree. I think, I guess maybe...
+    ```
+    and it has 3 turns and 5 utterances.
+
     Returns a list of dictionaries each with entries:
     speaker, onset, offset, and text.
     """
     records = []
     turn = 0
     first_speaker = 0 if first == "A" else 1
-    speakers = [conv - 100, conv]
+    speakers = [conv, conv - 100]
     with open(filepath, "r") as f:
         entry = {}
         for line in f.readlines():
@@ -85,6 +99,7 @@ def transcript2records(filepath: str, conv: int, first: str) -> list:
                     if line[0] != "(":
                         first_speaker += 1
                         turn += 1
+
                     entry["speaker"] = speakers[first_speaker % 2]
                     entry["turn"] = turn
                 else:
@@ -124,7 +139,6 @@ def main(args):
     files = glob(search_str)
     assert len(files), "No files found for: " + search_str
 
-    # TODO https://pypi.org/project/inflect/
     nlp = spacy.blank("en")
     nlp.add_pipe("sentencizer")
 
@@ -164,8 +178,6 @@ def main(args):
         del newfn["trial"], newfn["set"], newfn["item"], newfn["first"], newfn["condition"]
         newfn.update(suffix='events', ext='.csv')
         dft[dft.run == run_id].reset_index().to_csv(newfn, index=False)
-        print(newfn)
-        continue
 
         # Choose a strategy to align utterances
         use_timinglog = not True
