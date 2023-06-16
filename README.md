@@ -1,10 +1,5 @@
 # brain-to-brain hyperscanned fMRI conversations
 
-R&B -> r, b
-M&M's
-11:00 -> 11, 00
-
--c 120 -r 1 -t 3 has a `
 
 naming convention of conversations: conv-xxx is for subject 02 and 102
 subjects xx and 1xx are a dyad.
@@ -68,6 +63,7 @@ We have transcripts and audio at the trial level. Each transcript contains utter
 1. `process_transcripts.py` pipeline to normalize, sentencize, and tokenize transcripts and prepare for alignment
 1. `align_transcript.sh` run forced-alignment to get word-level onset/offsets
 1. `merge_transcripts.py` merge our utterance-level transcripts with forced aligner word-level
+1. `descriptive_stats.ipynb` for QA
 
 files:
 - trial-level .wav
@@ -76,14 +72,6 @@ files:
 - trial-level transcript TextGrid (.TextGrid)
 - trial-level aligned transcript TextGrid (_aligned.TextGrid)
 - trial-level aligned csv (_aligned.csv)
-- run-level csv transcript (? or just do it in python add transcript utils)
-
-todo:
-- put wavs only in audio datatype, the rest should be transcript
-- choose: keep misc entities in filename? set, item condition and first?
-- it should just be conv, run, and trial. and fix trial to  not be 1-20
-- Consider treatings these as events https://bids-specification.readthedocs.io/en/stable/04-modality-specific-files/05-task-events.html
-- AND move timingslog as events too!
 
 #### useful commands
 

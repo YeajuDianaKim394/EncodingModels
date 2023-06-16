@@ -1,15 +1,16 @@
 stimuli
 data
 sourcedata
-embeddings
-staging
-encoding
+embeddings*
+staging*
+encoding*
 logs
 mats
 scripts
 *.dict
 *.txt
 .trash
+*.svg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
