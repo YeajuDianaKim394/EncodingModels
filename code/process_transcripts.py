@@ -45,11 +45,12 @@ speaker_pattern = re.compile(r"\((\d{2}):(\d{2})\):$")
 bracket_pattern = re.compile(r"[\[\(].*?[\]\)]")
 
 # These things break MFA
-custom_substitutions = {101: [("somethin'", "something")]}
+custom_substitutions = {101: [("somethin'", "something")]}   # look for hopin
 
 
 def clean_utterance(text: str) -> str:
     """Clean up text"""
+    # TODO - replace weird apostraphe's with ascii one?
     normalized_text = re.sub(bracket_pattern, "", text)
     normalized_text = re.sub(r"\s+", " ", normalized_text).strip()
     return normalized_text
@@ -117,7 +118,32 @@ def transcript2records(filepath: str, conv: int, first: str) -> list:
     return records
 
 
+def csvtranscript2records(filepath: str|Path, conv: int, first: str) -> list:
+
+    df = pd.read_csv(filepath)
+
+    first_speaker = 0 if first == "A" else 1
+    speakers = [conv - 100, conv]
+    first_spk_label = df.speaker.iloc[0]
+    mask = df.speaker == first_spk_label
+    df.loc[mask, 'speaker'] = speakers[first_speaker]
+    df.loc[~mask, 'speaker'] = speakers[(first_speaker+1)%2]
+
+    if df.speaker.unique().size > 2:
+        raise ValueError(f'Too many speaker labels: {df.speaker.unique()}')
+
+    df.insert(2, 'offset', df.onset.shift(-1))
+    df.reset_index(names='utterance', inplace=True)
+    
+    turns = (df.speaker.diff().abs().fillna(0).cumsum() / 100).astype(int)
+    df.insert(0, 'turn', turns)
+
+    records = list(df.to_dict(orient='index').values())
+    return records
+
+
 def transcript2turns(filepath: str) -> list:
+    # if using timinglog file
     with open(filepath, 'r') as f:
         turns = []
         for line in f.readlines():
@@ -131,7 +157,8 @@ def transcript2turns(filepath: str) -> list:
 def main(args):
     """Move and process transcripts."""
 
-    transpath = Path(root='stimuli', datatype='audio', suffix='transcript', ext='.txt')
+    # transpath = Path(root='stimuli', datatype='audio', suffix='transcript', ext='.txt')
+    transpath = Path(root='stimuli', datatype='transcript', suffix='utterance', ext='.csv')
     transpath.update(**vars(args))
     search_str = transpath.starstr(["conv", "datatype"])
     print(search_str)
@@ -161,13 +188,18 @@ def main(args):
     suffix_regex = spacy.util.compile_suffix_regex(suffixes)
     nlp.tokenizer.suffix_search = suffix_regex.search
 
+    from constants import CONVS_STRANGERS
+
     for transfn in files:
 
         transpath = Path.frompath(transfn)
-        transpath.update(root='stimuli', datatype='audio')
+        transpath.update(root='stimuli', datatype='transcript')
         conv_id = transpath['conv']
         run_id = transpath['run']
         trial_id = ((int(transpath["trial"]) - 1) % 4) + 1
+
+        if conv_id not in CONVS_STRANGERS:
+            continue
 
         # Find and read timing log file
         timingfn = sorted(
@@ -176,7 +208,8 @@ def main(args):
         dft = pd.read_csv(timingfn)
         newfn = transpath.copy()
         del newfn["trial"], newfn["set"], newfn["item"], newfn["first"], newfn["condition"]
-        newfn.update(suffix='events', ext='.csv')
+        newfn.update(datatype='events', suffix='events', ext='.csv')
+        newfn.mkdirs()
         dft[dft.run == run_id].reset_index().to_csv(newfn, index=False)
 
         # Choose a strategy to align utterances
@@ -204,23 +237,31 @@ def main(args):
         else:
             # Transform transcript file into utterance records
             try:
-                records = transcript2records(
+                # records = transcript2records(
+                #     transfn, conv=conv_id, first=transpath["first"]
+                # )
+                records = csvtranscript2records(
                     transfn, conv=conv_id, first=transpath["first"]
                 )
-                transpath.update(suffix=None, ext='.wav')
-                records[-1]["offset"] = get_duration(path=transpath)
-            except KeyError as e:
+                audiopath = transpath.copy()
+                audiopath.update(datatype='audio', suffix=None, ext='.wav')
+                records[-1]["offset"] = get_duration(path=audiopath)
+            except ValueError as e:
                 print("[ERROR] failed to parse", transfn, e)
                 continue
 
         # Clean up utterances
-        for entry in records:
-            text = entry["text"]
-            if substitutions := custom_substitutions.get(conv_id):
-                for subs in substitutions:
-                    text = text.replace(subs[0], subs[1])
-            text = clean_utterance(entry["text"])
-            entry["text"] = text
+        try:
+            for entry in records:
+                text = entry["text"]
+                if substitutions := custom_substitutions.get(conv_id):
+                    for subs in substitutions:
+                        text = text.replace(subs[0], subs[1])
+                text = clean_utterance(text) if len(text) else None
+                entry["text"] = text
+        except TypeError as e:
+            print('[ERROR]', transfn, e)
+            breakpoint()
 
         # Get individual sentences and tokens
         for entry in records:
@@ -280,18 +321,13 @@ def main(args):
 
         # Save textgrid
         tg.save(
-            transpath.update(ext=".TextGrid"),
+            transpath.update(suffix=None, ext=".TextGrid"),
             format="long_textgrid",
             includeBlankSpaces=False,
             reportingMode="silence",
         )
         # Save transcript
-        df.to_csv(transpath.update(suffix="transcript", ext=".csv"), index=False)
-
-        # Save run timing file ( will be overwritten each turn but ok )
-        # del newfn["trial"], newfn["set"], newfn["item"], newfn["first"]
-        # newfn.update(suffix="timing", ext=".csv")
-        # dft[dft.run == run_id].reset_index().to_csv(newfn)
+        df.to_csv(transpath.update(suffix="word", ext=".csv"), index=False)
 
 
 if __name__ == "__main__":

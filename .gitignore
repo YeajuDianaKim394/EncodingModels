@@ -4,6 +4,7 @@ sourcedata
 embeddings*
 staging*
 encoding*
+aligned*
 logs
 mats
 scripts
