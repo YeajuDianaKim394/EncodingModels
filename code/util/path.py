@@ -1,33 +1,33 @@
-from collections import OrderedDict
 from copy import deepcopy
 from os import makedirs, path
-from typing import Iterable
+from typing import Any, Iterable, Optional
 
 
-class Path(OrderedDict):
+class Path(object):
     # bids: root / sub / <ses> / <dtype> / <entities>_suffix.ext
     # inspired by
     # https://bids-specification.readthedocs.io/en/stable/02-common-principles.html#filenames
 
     def __init__(
         self,
-        root: str = None,
-        datatype: str = None,
-        suffix: str = None,
-        ext: str = None,
+        root: Optional[str] = None,
+        datatype: Optional[str] = None,
+        suffix: Optional[str] = None,
+        ext: Optional[str] = None,
         subdirkeys: Iterable[str] = ("sub", "conv", "ses", "datatype"),
         **kwargs,
     ) -> None:
-        super().__init__({k: v for k, v in kwargs.items() if v is not None})
-        self.ext = ext  # toDO make property and setter
+        self.ext = ext
         self.root = root
         self.suffix = suffix
         self.datatype = datatype
         self.subdirkeys = subdirkeys
+        self.metakeys = {"root", "datatype", "suffix", "ext"}
+        self.entities = {k: v for k, v in kwargs.items() if v is not None}
 
     @property
     def basename(self) -> str:
-        filename = self.stitch_(**self)
+        filename = self.stitch_(**self.entities)
         if (suffix := self.suffix) is not None:
             filename += "_" + suffix
         if (ext := self.ext) is not None:
@@ -42,12 +42,26 @@ class Path(OrderedDict):
         if self.root is not None:
             dirnames.append(self.root)
         for subdirkey in self.subdirkeys:
-            if subdirkey in self:
+            if subdirkey in self.entities:
                 dirnames.append(f"{subdirkey}-{self[subdirkey]}")
             elif hasattr(self, subdirkey):
                 if (value := getattr(self, subdirkey)) is not None:
                     dirnames.append(value)
         return path.join(*dirnames)
+
+    def __getitem__(self, item: str) -> Any:
+        if item in self.entities:
+            return self.entities[item]
+        elif isinstance(item, str) and hasattr(self, item):
+            return getattr(self, item)
+        else:
+            raise ValueError("item does not exist", item)
+
+    def __delitem__(self, __name: str) -> None:
+        if __name in self.entities:
+            del self.entities[__name]
+        elif hasattr(self, __name):
+            setattr(self, __name, None)
 
     @property
     def fpath(self) -> str:
@@ -58,9 +72,9 @@ class Path(OrderedDict):
 
         if self.root is not None:
             dirnames.append(self.root)
-        
+
         for subdirkey in subdirkeys:
-            if subdirkey in self:
+            if subdirkey in self.entities:
                 dirnames.append(f"{subdirkey}-{self[subdirkey]}")
             elif hasattr(self, subdirkey):
                 if (value := getattr(self, subdirkey)) is not None:
@@ -68,7 +82,7 @@ class Path(OrderedDict):
             else:
                 dirnames.append(f"{subdirkey}-*")
 
-        filename = self.stitch_("*", **self)
+        filename = self.stitch_("*", **self.entities)
         filename += "*"
         if (suffix := self.suffix) is not None:
             filename += "_" + suffix
@@ -82,14 +96,13 @@ class Path(OrderedDict):
         self,
         **kwargs,
     ):
-        fields = {'root', 'datatype', 'suffix', 'ext'}
         for key, value in kwargs.items():
-            if key in fields:
+            if key in self.metakeys:
                 setattr(self, key, kwargs[key])
-        for key in fields:
+        for key in self.metakeys:
             if key in kwargs:
                 del kwargs[key]
-        super().update({k: v for k, v in kwargs.items() if v is not None})
+        self.entities.update({k: v for k, v in kwargs.items() if v is not None})
         return self
 
     def mkdirs(self, exist_ok: bool = True) -> None:

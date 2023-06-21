@@ -1,0 +1,35 @@
+"""Copy raw timing log files to BIDS.
+"""
+
+from glob import glob
+from os import path
+
+import pandas as pd
+from constants import CONVS_STRANGERS, RUNS
+from util.path import Path
+
+
+def main():
+    timingdir = "sourcedata/CONV_scan/data/TimingsLog"
+
+    for conv in CONVS_STRANGERS:
+        # get the latest timing log
+        files = sorted(glob(path.join(timingdir, f"CONV_{conv:03d}_TimingsLog*.csv")))
+        if not len(files):
+            print(f"[ERROR] no TimingLog exists for conversation {conv:03d}")
+            continue
+
+        filename = files[-1]
+        df = pd.read_csv(filename)
+        newfile = Path(root="stimuli", datatype="timing", suffix="events", ext=".csv")
+        conv_id = path.basename(filename).split("_")[1]
+        newfile.update(conv=conv_id)
+        newfile.mkdirs()
+        for run in RUNS:
+            df2 = df[df.run == run].reset_index(drop=True)
+            newfile.update(run=run)
+            df2.to_csv(newfile, index=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -99,3 +99,19 @@ Convert aligned csv to audacity labels to verify alignment:
 ```
 function t2aud() { awk -v OFS="\t" -F"," '{print $10,$11,$8}' "$1" | tail -n +2 }
 ```
+
+## brain 
+
+ROIs
+https://web.mit.edu/evlab/funcloc/
+https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations
+
+or use neuromaps to get these? but if i have to resample it anyways? can i resample with nilearn
+or should i use 3dsample ?
+```
+wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_MD_HE197.nii
+wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_MD_HE197.txt
+wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_language_SN220.nii
+wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_language_SN220.txt
+wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/MNI/Schaefer2018_1000Parcels_Kong2022_17Networks_order_FSLMNI152_1mm.nii.gz
+ ```

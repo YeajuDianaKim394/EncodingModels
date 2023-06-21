@@ -35,15 +35,20 @@ EMBEDDINGS = {
 
 random_w2v = {}
 
-def add_static_embeddings(df, modelname, key='token_norm', lowercase=True, norm=True, **kwargs):
+def add_static_embeddings(df, modelname, key='hftoken', lowercase=True, norm=True, **kwargs):
     # To see what models gensim has:
     # info = api.info()
     # info['models']
     model = api.load(modelname)
 
+    if (tokenizer := kwargs.get('tokenizer')) is not None:
+        df[key] = df.token.apply(lambda x: [str(t) for t in tokenizer(x)])  # use token?
+        df = df.explode(key, ignore_index=True)
+
     words = df[key]
     if lowercase:
         words = words.str.lower()
+        # TODO and strip punctuation?
 
     def get_vector(word):
         if word in model.key_to_index:
@@ -336,7 +341,10 @@ def add_causal_lm_embs(df, hfmodelname, layer=-1, device='cpu', untrained=False,
 def add_embeddings(df: pd.DataFrame, hfmodelname: str, **kwargs):
     model = hfmodelname
     if 'glove' in model:
-        return add_static_embeddings(df, model, **kwargs)
+        from spacy.lang.en import English
+        nlp = English()
+        tokenizer = nlp.tokenizer
+        return add_static_embeddings(df, model, key='hftoken', tokenizer=tokenizer, **kwargs)
     elif 'gpt2' in model or 'llama' in model:
         return add_causal_lm_embs(df, model, **kwargs)
     elif 'blenderbot' in model:
@@ -362,7 +370,7 @@ def main(args):
     # if modelname in ['arbitrary', 'random']:
     #     suffix += f'_seed-{args.seed}'
 
-    transpath = Path(root="stimuli", datatype="transcript", ext=".csv")
+    transpath = Path(root="stimuli", datatype="aligned", conv="*", ext=".csv")
     transpath.update(**{k: v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
 

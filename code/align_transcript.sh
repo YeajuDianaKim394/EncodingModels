@@ -15,11 +15,12 @@
 strangers="101 104 105 106 107 108 111 112 114 116 117 119 120 122 123 126 128 129 131 132 133 137 138 142 143 153 156 157 158 163 171 174"
 friends="103 109 113 118 121 127 130 134 145 146 147 148 150 151 152 154 155 159 160 161 162 164 165 166 167 169 170 172 173 175"
 
-# strangers=(101 104 105 106 107 108 111 112 114 116 117 119 120 122 123 126 128 129 131 132 133 137 138 142 143 153 156 157 158 163 171 174)
+# removed bad convs 119, 168, 171
+strangers="101 104 105 106 107 108 111 112 114 116 117 120 122 123 126 128 129 131 132 133 137 138 142 143 153 156 157 158 163 174"
 
-source /usr/share/Modules/init/bash
-module load anacondapy/2022.05
-conda activate fb2b
+# source /usr/share/Modules/init/bash
+# module load anacondapy/2022.05
+# conda activate fb2b
 
 export MFA_ROOT_DIR="/scratch/zzada/MFA"
 
@@ -30,7 +31,7 @@ model="english_mfa"
 # mfa model download acoustic $model
 # mfa model download dictionary $model
 
-# mfa configure --disable_auto_server
+mfa configure --disable_auto_server
 # mfa server start
 
 # Run alignment on one conversation
@@ -44,7 +45,7 @@ model="english_mfa"
 #   --num_jobs 2
 #   --beam 100 --retry_beam 400
 
-stagedir="staging/audio/"
+stagedir="staging/audio"
 tempdir="staging/mfa/"
 
 mkdir -p "$stagedir"
@@ -67,16 +68,17 @@ fi
 
 for convid in $convs; do
     echo "on conv-$convid $(date -Iminutes)"
-    for file in $(ls -1 stimuli/conv-$convid/audio/*.TextGrid); do
+    for file in $(ls -1 stimuli/conv-$convid/transcript/*.TextGrid); do
         echo $file
         base="$(basename $file .TextGrid | head -c 50)"
         datadir="$stagedir/$base"
         mkdir -p $datadir
         ln -fs $PWD/$file $datadir
-        ln -fs $PWD/${file%.*}.wav $datadir
-        outdir="stimuli/conv-$convid/transcript"
+        audiofile=${file/transcript/audio}
+        ln -fs $PWD/${audiofile%.*}.wav $datadir
+        outdir="stimuli/conv-$convid/aligned"
         # mfa validate --temporary_directory $temp_dir $data_dir $model $model
-        mfa align --overwrite --single_speaker --temporary_directory $tempdir $datadir $model $model $outdir --beam 1000 --retry_beam 4000
+        echo mfa align --overwrite --single_speaker --temporary_directory $tempdir $datadir $model $model $outdir --beam 1000 --retry_beam 4000
     done
 done
 

@@ -1,5 +1,7 @@
 """Project-level constants."""
 
+# TODO - remove convs 119, 168, 171 but whats'w rong with 119? and 143
+
 TR = 1.5
 SEED = 42
 
@@ -9,7 +11,9 @@ NTRIALS = len(TRIALS)
 NRUNS = len(RUNS)
 
 # filename keys, useful for ArgumentParser args object when updating Paths
-FNKEYS = ('conv', 'run', 'trial')
+FNKEYS = ("conv", "run", "trial")
+
+PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~"  # string.punctuation without [ ]
 
 CONVS_STRANGERS = (
     101,
@@ -23,7 +27,6 @@ CONVS_STRANGERS = (
     114,
     116,
     117,
-    119,
     120,
     122,
     123,
@@ -42,7 +45,6 @@ CONVS_STRANGERS = (
     157,
     158,
     163,
-    171,
     174,
 )
 CONVS_FRIENDS = (
