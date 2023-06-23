@@ -19,10 +19,13 @@ def main():
             print(f"[ERROR] no TimingLog exists for conversation {conv:03d}")
             continue
 
-        filename = files[-1]
-        df = pd.read_csv(filename)
+        dfs = []
+        for filename in files:
+            dfs.append(pd.read_csv(filename))
+        df = pd.concat(dfs).reset_index(drop=True)
+
         newfile = Path(root="stimuli", datatype="timing", suffix="events", ext=".csv")
-        conv_id = path.basename(filename).split("_")[1]
+        conv_id = path.basename(files[-1]).split("_")[1]
         newfile.update(conv=conv_id)
         newfile.mkdirs()
         for run in RUNS:

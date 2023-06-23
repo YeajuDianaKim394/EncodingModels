@@ -1,7 +1,5 @@
 """Project-level constants."""
 
-# TODO - remove convs 119, 168, 171 but whats'w rong with 119? and 143
-
 TR = 1.5
 SEED = 42
 
@@ -10,13 +8,23 @@ TRIALS = (1, 2, 3, 4)
 NTRIALS = len(TRIALS)
 NRUNS = len(RUNS)
 
+RUN_TRS = 544
+TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
+CONV_TRS = 120
+
 # filename keys, useful for ArgumentParser args object when updating Paths
 FNKEYS = ("conv", "run", "trial")
 
 PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~"  # string.punctuation without [ ]
 
+EXCLUDED_CONV = (
+    101,  # acquisition error, missing TRs
+    119,  # aborted scan
+    168,  # excessive movement
+    171,  # missing runs due to malfunction. aborted scan
+)
+
 CONVS_STRANGERS = (
-    101,
     104,
     105,
     106,
@@ -80,3 +88,18 @@ CONVS_FRIENDS = (
     175,
 )
 CONVS = CONVS_STRANGERS + CONVS_FRIENDS
+
+CONFOUNDS = [
+    "a_comp_cor_00",
+    "a_comp_cor_01",
+    "a_comp_cor_02",
+    "a_comp_cor_03",
+    "a_comp_cor_04",
+    "trans_x",
+    "trans_y",
+    "trans_z",
+    "rot_x",
+    "rot_y",
+    "rot_z",
+    "cosine00",
+]
