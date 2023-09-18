@@ -16,22 +16,28 @@ subjects xx and 1xx are a dyad.
 .
 ├── code
 │   ├── util
-│   └── *.py  # see below for full description
+│   └── *.py                     # see below for full description
 ├── data                
-│   ├── audio           
-│   │   ├── aligned     
-│   │   └── segmented   
-├── data/source
-│   ├── CONV  # all fMRI data and fMRIPrep preprocessed:
-│   │   ├── data/bids/derivatives/fmriprep
-│   ├── CONV_scan  # see below
-│   │   └── 
+│   ├── sub-*
+│   └── derivatives/fmriprep     # preprocessed BOLD data
+├── stimuli
+│   ├── conv-*
+│   │   ├── audio/
+│   │   │   └── *.wav            # per-trial audio file
+│   │   ├── transcript/
+│   │   │   ├── *_utterance.csv  # cleaned up original transcript
+│   │   │   ├── *_word.csv       # tokenized, sentencized word-level transcript
+│   │   │   └── *.TextGrid       # utterance-level transcript based on tokens
+│   │   ├── aligned/
+│   │   │   ├── *.TextGrid       # output of forced aligner
+│   │   │   └── *_word.csv       # aligned textgrid merged with word-level transcript
+│   │   ├── timing/
+│   │   └── └── *_events.csv     # timinglog
 │   └── 
 └── 
 ```
-Generate with `tree -d -L 3`
 
-Behavrioal data is in `data/source/Conv_scan/data`:
+Behavrioal data is in `sourcedata/Conv_scan/data`:
 
 ```bash
 .
@@ -58,20 +64,13 @@ Behavrioal data is in `data/source/Conv_scan/data`:
 We have transcripts and audio at the trial level. Each transcript contains utterances per speaker turn and the utterance onset.
 
 1. `split_audio_clips.py` splits one long audio file into per run/trial files
-1. `copy_transcripts.py` copies raw transcripts as-is into our folder structure
+1. `copy_transcripts.py` copies and normalizes raw transcripts into the stimuli/ directory
+1. `copy_timings.py` copies and normalizes raw transcripts into the stimuli/ directory
 1. `fix_transcripts.sh` fix transcription problems
 1. `process_transcripts.py` pipeline to normalize, sentencize, and tokenize transcripts and prepare for alignment
 1. `align_transcript.sh` run forced-alignment to get word-level onset/offsets
 1. `merge_transcripts.py` merge our utterance-level transcripts with forced aligner word-level
-1. `descriptive_stats.ipynb` for QA
-
-files:
-- trial-level .wav
-- trial-level raw transcript (.txt)
-- trial-level cleaned transcript (.csv)
-- trial-level transcript TextGrid (.TextGrid)
-- trial-level aligned transcript TextGrid (_aligned.TextGrid)
-- trial-level aligned csv (_aligned.csv)
+1. `qa.ipynb` for QA along the way
 
 #### useful commands
 
