@@ -1,18 +1,20 @@
 """Copy raw timing log files to BIDS.
+
+Some sessions have multiple logs which need to be merged.
 """
 
 from glob import glob
 from os import path
 
 import pandas as pd
-from constants import CONVS_STRANGERS, RUNS
+from constants import CONVS, RUNS
 from util.path import Path
 
 
 def main():
     timingdir = "sourcedata/CONV_scan/data/TimingsLog"
 
-    for conv in CONVS_STRANGERS:
+    for conv in CONVS:
         # get the latest timing log
         files = sorted(glob(path.join(timingdir, f"CONV_{conv:03d}_TimingsLog*.csv")))
         if not len(files):

@@ -1,6 +1,6 @@
-"""Move and modify transcripts to prepare for alignment with audio.
+"""Prepare transcripts for forced alignment with audio.
 
-Creates a csv and TextGrid file version of each transcript.
+Creates a normalized word-level .csv and utterance-level .TextGrid for each transcript.
 
 Pipline
 -------
@@ -24,7 +24,7 @@ from glob import glob
 
 import pandas as pd
 import spacy
-from constants import CONVS_STRANGERS, FNKEYS, PUNCTUATION
+from constants import CONVS_FRIENDS, CONVS_STRANGERS, FNKEYS, PUNCTUATION
 from librosa import get_duration
 from spacy.symbols import ORTH
 from util.path import Path
@@ -157,11 +157,19 @@ def main(args):
         transpath = Path.frompath(transfn)
         transpath.update(root="stimuli", datatype="transcript")
 
-        conv_id = transpath["conv"]
-        if conv_id not in CONVS_STRANGERS:  # NOTE - temporary
-            continue
+        # conv_id = transpath["conv"]
+        # if conv_id not in CONVS_FRIENDS:  # NOTE - temporary
+        #     continue
 
         uttdf = pd.read_csv(transfn)
+
+        # Add offset and turn information
+        uttdf.insert(
+            2, "offset", uttdf.onset.shift(-1, fill_value=180)
+        )  # 180 s per trial
+        uttdf.reset_index(names="utterance", inplace=True)
+        turns = (uttdf.speaker.diff().abs().fillna(0).cumsum() / 100).astype(int)
+        uttdf.insert(0, "turn", turns)
 
         # # Add actual offset from wav file (not sure if really needed)
         # audiopath = transpath.copy()

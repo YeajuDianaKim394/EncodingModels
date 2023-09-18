@@ -8,9 +8,9 @@
 import re
 from glob import glob
 from os import path
-from typing import Any
 
 import pandas as pd
+from constants import EXCLUDED_CONVS
 from util.path import Path
 
 bracket_re = re.compile(r"[\[\(].*?[\]\)]")
@@ -106,23 +106,8 @@ def txt2csv(filepath: str | Path) -> pd.DataFrame:
     return df
 
 
-def fwf2csv(filepath: str | Path) -> pd.DataFrame:
-    """Fixed-width file to CSV. Unusued."""
-    records = []
-    with open(filepath, "r") as f:
-        for line in f.readlines():
-            line = line.strip()
-            if len(line):
-                speaker = line[:55].strip().strip(":")
-                onset = line[55:105].strip()
-                text = line[105:].strip()
-                records.append((speaker, onset, text))
-    df = pd.DataFrame(records, columns=("speaker", "onset", "text"))
-    return df
-
-
-def expand_columns(df: pd.DataFrame, conv: int, first: str) -> pd.DataFrame:
-    """Infer speaker labels, and add offset and turn columns."""
+def infer_speakers(df: pd.DataFrame, conv: int, first: str) -> pd.DataFrame:
+    """Infer speaker labels."""
 
     first_speaker = 0 if first == "A" else 1
     speakers = [conv - 100, conv]
@@ -130,12 +115,6 @@ def expand_columns(df: pd.DataFrame, conv: int, first: str) -> pd.DataFrame:
     mask = df.speaker == first_spk_label
     df.loc[mask, "speaker"] = speakers[first_speaker]
     df.loc[~mask, "speaker"] = speakers[(first_speaker + 1) % 2]
-
-    df.insert(2, "offset", df.onset.shift(-1, fill_value=180))  # 180 s per trial
-    df.reset_index(names="utterance", inplace=True)
-
-    turns = (df.speaker.diff().abs().fillna(0).cumsum() / 100).astype(int)
-    df.insert(0, "turn", turns)
 
     return df
 
@@ -162,12 +141,16 @@ def main(args):
         filename = path.splitext(path.basename(filepath.replace("CONV", "conv")))[0]
         entities: dict[str, str] = dict(zip(*[iter(filename.split("_"))] * 2))  # type: ignore
 
+        if int(entities["conv"]) in EXCLUDED_CONVS:
+            continue
+
         df = txt2csv(filepath)
-        df = expand_columns(df, conv=int(entities["conv"]), first=entities["first"])
 
         # Check if there's just one speaker
         if len(df.speaker.unique()) != 2:
             print("WARN less/more than two speakers", filename)
+
+        df = infer_speakers(df, conv=int(entities["conv"]), first=entities["first"])
 
         # Save file
         transpath = Path(

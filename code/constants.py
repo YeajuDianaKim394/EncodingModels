@@ -17,7 +17,7 @@ FNKEYS = ("conv", "run", "trial")
 
 PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~"  # string.punctuation without [ ]
 
-EXCLUDED_CONV = (
+EXCLUDED_CONVS = (
     101,  # acquisition error, missing TRs
     119,  # aborted scan
     168,  # excessive movement
