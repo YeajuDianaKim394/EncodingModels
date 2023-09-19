@@ -95,6 +95,7 @@ sed -i '16s/106/116/' stimuli/conv-109/transcript/conv-109_run-4_set-3_trial-15_
 sed -i '18s/121/125/' stimuli/conv-109/transcript/conv-109_run-4_set-3_trial-15_item-15_condition-G_first-B_utterance.csv
 sed -i '23s/155/160/' stimuli/conv-109/transcript/conv-109_run-4_set-3_trial-15_item-15_condition-G_first-B_utterance.csv
 
+sed -i '4s/129/98/' stimuli/conv-112/transcript/conv-112_run-3_set-2_trial-12_item-12_condition-G_first-B_utterance.csv
 sed -i '7d' stimuli/conv-112/transcript/conv-112_run-4_set-3_trial-16_item-16_condition-G_first-A_utterance.csv
 
 sed -i '7s/77/101/' stimuli/conv-113/transcript/conv-113_run-5_set-3_trial-18_item-17_condition-G_first-B_utterance.csv
@@ -116,6 +117,8 @@ sed -i '3s/3/17/' stimuli/conv-146/transcript/conv-146_run-5_set-3_trial-19_item
 sed -i '4s/28/20/' stimuli/conv-146/transcript/conv-146_run-5_set-3_trial-19_item-20_condition-G_first-A_utterance.csv
 
 sed -i '5d' stimuli/conv-152/transcript/conv-152_run-3_set-2_trial-10_item-10_condition-G_first-A_utterance.csv
+
+sed -i '15s/174/171/' stimuli/conv-153/transcript/conv-153_run-2_set-1_trial-8_item-7_condition-G_first-B_utterance.csv
 
 sed -i '7s/47/46/' stimuli/conv-154/transcript/conv-154_run-1_set-1_trial-2_item-2_condition-G_first-B_utterance.csv
 
