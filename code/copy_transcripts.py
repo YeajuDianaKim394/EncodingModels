@@ -6,6 +6,7 @@
 """
 
 import re
+import string
 from glob import glob
 from os import path
 
@@ -13,11 +14,12 @@ import pandas as pd
 from constants import EXCLUDED_CONVS
 from util.path import Path
 
-bracket_re = re.compile(r"[\[\(].*?[\]\)]")
-inaudible_re = re.compile(r"\[inaudible.*\]")
+bracket_re = re.compile(r"\s?[\[\(].*?[\]\)],?")
+inaudible_re = re.compile(r"\s?\[inaudible[^]]*\][,]?")
 laugh_re = re.compile(r"\([Ll]augh(s|ing|ter)?\)")
 speaker_re = re.compile(r"\((\d{2}):(\d{2})\):$")
 quote_re = re.compile(r"[’‘]")
+punct_re = re.compile("[\s{}]+$".format(re.escape(string.punctuation)))
 space_re = re.compile(r"\s+")
 
 
@@ -50,8 +52,8 @@ def normalize_text(text: str) -> str:
     # Replace laughts with special token
     normalized_text = laugh_re.sub("[laughter]", normalized_text)
 
-    # # Replace remaining brackets
-    # normalized_text = re.sub(bracket_re, "[bracketed]", normalized_text)
+    # Replace remaining brackets
+    normalized_text = re.sub(bracket_re, "", normalized_text)
 
     # Remove double spaces
     normalized_text = space_re.sub(" ", normalized_text)
@@ -102,6 +104,9 @@ def txt2csv(filepath: str | Path) -> pd.DataFrame:
     df = pd.DataFrame(records, columns=("speaker", "onset", "text"))
     df.speaker.ffill(inplace=True)
     df["text"] = df["text"].apply(normalize_text)
+
+    # Remove all rows with only punctuation
+    df = df[df["text"].apply(lambda x: punct_re.match(x) is None)]
 
     return df
 
