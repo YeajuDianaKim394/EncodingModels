@@ -143,7 +143,7 @@ def original_code():
                     os.makedirs(new_clip_dir, exist_ok=True)
                     new_clip_filepath = os.path.join(
                         new_clip_dir,
-                        f"conv-{subj_name}_run-{runs[i]}_set-{sets[i]}_trial-{trials[i]}_item-{items[i]}_condition-{conditions[i]}_first-{first_speakers[i]}.wav",
+                        f"conv-{subj_name}_run-{runs[i]}_set-{sets[i]}_trial-{trials[i]}_item-{int(items[i])}_condition-{conditions[i]}_first-{first_speakers[i]}.wav",
                     )
 
                     # find start and end position for trial-specific audio segment
@@ -176,10 +176,12 @@ def copy_fixes():
 
     new_root = os.path.join(path_base, "stimuli")
     for wavfn in wavfiles:
+        # if '103' not in wavfn: continue  # if you want to run for a specific conversation
         basename = os.path.basename(wavfn).replace("CONV", "conv")
         string, _ = os.path.splitext(basename)
         parts = string.split("_")
         d = dict(zip(*[iter(parts)] * 2))
+        d['item'] = str(int(float(d['item'])))
 
         wavpath = Path(**d, root=new_root, datatype="audio", ext=".wav")
         wavpath.mkdirs()

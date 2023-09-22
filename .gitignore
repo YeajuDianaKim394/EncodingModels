@@ -17,6 +17,7 @@ scripts
 *.gz
 *.csv
 *.wav
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

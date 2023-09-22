@@ -3,6 +3,8 @@
 GLoVE and GPT-2 embeddings are currently supported. Though theoretically any
 static model from gensim and any causal model from transformers should work.
 
+To run:
+strangers=(104 105 106 107 108 111 112 114 116 117 120 122 123 126 128 129 131 132 133 137 138 142 143 153 156 157 158 163 174)
 for c in $strangers; do python code/embeddings.py -c $c -m gpt2; done
 """
 
@@ -35,6 +37,15 @@ EMBEDDINGS = {
 
 random_w2v = {}
 
+# How to use spacy with a dataframe:
+# 1. ensure there are no whitespace characters for each word you have
+# 2. join all words with whitespace
+# 3. feed into spacy nlp pipeline
+# 4. for each token, if it has a .whitespace_ == ' ', then move on to the next word
+#    otherwise its for the same word
+# doc = nlp("Gotta gimme that amazing stuff!")
+# print([(t.text, t.whitespace_) for t in doc])
+
 
 def add_static_embeddings(
     df, modelname, key="hftoken", lowercase=True, norm=True, **kwargs
@@ -45,7 +56,7 @@ def add_static_embeddings(
     model = api.load(modelname)
 
     if (tokenizer := kwargs.get("tokenizer")) is not None:
-        df[key] = df.token.apply(lambda x: [str(t) for t in tokenizer(x)])  # use token?
+        df[key] = df.word.apply(lambda x: [str(t) for t in tokenizer(x)])  # use token?
         df = df.explode(key, ignore_index=True)
 
     words = df[key]
@@ -232,9 +243,14 @@ def add_causal_lm_embs(
     if maxlen is None:
         maxlen = tokenizer.model_max_length
 
+    if int(layer) == layer:
+        layer = int(layer)
+    else:
+        layer = int(model.config.n_layer * args.layer)
+
     # Tokenize input
     df.insert(0, "word_idx", df.index.values)
-    df["hftoken"] = df.token.apply(tokenizer.tokenize)
+    df["hftoken"] = df.word.apply(tokenizer.tokenize)
     df = df.explode("hftoken", ignore_index=True)
     df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
     tokenids = df.token_id.tolist()
@@ -391,7 +407,9 @@ def main(args):
     # if modelname in ['arbitrary', 'random']:
     #     suffix += f'_seed-{args.seed}'
 
-    transpath = Path(root="stimuli", datatype="aligned", conv="*", ext=".csv")
+    transpath = Path(
+        root="stimuli", datatype="transcript", suffix="aligned", conv="*", ext=".csv"
+    )
     transpath.update(**{k: v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
 
@@ -399,12 +417,16 @@ def main(args):
     if not len(files):
         raise FileNotFoundError("No files found for: " + search_str)
 
+    dirname = f'model-{args.model}'
+    if args.layer != -1:
+        dirname += f'_layer-{args.layer}'
+
     for tpath in files:
-        df = pd.read_csv(tpath, index_col=0)
+        df = pd.read_csv(tpath)
         df = add_embeddings(df, **vars(args))
 
         epath = Path.frompath(tpath)
-        epath.update(root="embeddings", datatype=args.model, suffix=None, ext="pkl")
+        epath.update(root="embeddings", datatype=dirname, suffix=None, ext="pkl")
         epath.mkdirs()
         df.to_pickle(epath)
 
@@ -418,7 +440,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--trial", type=int)
     parser.add_argument("-m", "--model", default="glove-50")
     parser.add_argument("--maxlen", type=int, default=None)
-    parser.add_argument("--layer", type=int, default=-1)
+    parser.add_argument("--layer", type=float, default=-1)
     parser.add_argument("--cuda", type=int, default=0)
     parser.add_argument("--ndim", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)

@@ -63,13 +63,17 @@ Behavrioal data is in `sourcedata/Conv_scan/data`:
 ### transcript preprocessing
 We have transcripts and audio at the trial level. Each transcript contains utterances per speaker turn and the utterance onset.
 
-1. `split_audio_clips.py` splits one long audio file into per run/trial files
-1. `copy_transcripts.py` copies and normalizes raw transcripts into the stimuli/ directory
-1. `copy_timings.py` copies and normalizes raw transcripts into the stimuli/ directory
+1. `split_audio_clips.py` splits one long audio file into per run/trial files in `stimuli/audio`
+1. `copy_transcripts.py` copies and normalizes raw transcripts into `stimuli/transcript`
+1. `copy_timings.py` copies and normalizes raw transcripts into `stimuli/timing`
 1. `fix_transcripts.sh` fix transcription problems
+
+1. `wordalign.py` uses whisperx wav2vec implementation to force-align
+
 1. `process_transcripts.py` pipeline to normalize, sentencize, and tokenize transcripts and prepare for alignment
 1. `align_transcript.sh` run forced-alignment to get word-level onset/offsets
 1. `merge_transcripts.py` merge our utterance-level transcripts with forced aligner word-level
+
 1. `qa.ipynb` for QA along the way
 
 #### useful commands
@@ -97,6 +101,14 @@ grep -ohrE '\(\w*\)'sourcedata/raw_transcripts_from_Revs | sort | uniq -c | sort
 Convert aligned csv to audacity labels to verify alignment:
 ```
 function t2aud() { awk -v OFS="\t" -F"," '{print $10,$11,$8}' "$1" | tail -n +2 }
+```
+
+## dependencies
+
+See `requirements.txt` and:
+
+```
+pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter
 ```
 
 ## brain 
