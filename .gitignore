@@ -11,6 +11,7 @@ mats
 scripts
 *.dict
 *.txt
+!requirements.txt
 .trash
 *.svg
 *.nii
