@@ -15,7 +15,8 @@ CONV_TRS = 120
 # filename keys, useful for ArgumentParser args object when updating Paths
 FNKEYS = ("conv", "run", "trial")
 
-PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~"  # string.punctuation without [ ]
+# PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~"  # string.punctuation without [ ]
+PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 EXCLUDED_CONVS = (
     101,  # acquisition error, missing TRs
@@ -89,17 +90,91 @@ CONVS_FRIENDS = (
 )
 CONVS = CONVS_STRANGERS + CONVS_FRIENDS
 
+SUBS_STRANGERS = list(CONVS_STRANGERS) + [c - 100 for c in CONVS_STRANGERS]
+SUBS_FRIENDS = list(CONVS_FRIENDS) + [c - 100 for c in CONVS_FRIENDS]
+SUBS = SUBS_FRIENDS + SUBS_STRANGERS
+
 CONFOUNDS = [
     "a_comp_cor_00",
     "a_comp_cor_01",
     "a_comp_cor_02",
     "a_comp_cor_03",
     "a_comp_cor_04",
-    "trans_x",
-    "trans_y",
-    "trans_z",
-    "rot_x",
-    "rot_y",
-    "rot_z",
     "cosine00",
+    "cosine01",
+    "cosine02",
+    "cosine03",
+    "cosine04",
+    "cosine05",
+    "cosine06",
+    "cosine07",
+    "cosine08",
+    "cosine09",
+    "cosine10",
+    "trans_x",
+    "trans_x_derivative1",
+    "trans_x_derivative1_power2",
+    "trans_x_power2",
+    "trans_y",
+    "trans_y_derivative1",
+    "trans_y_derivative1_power2",
+    "trans_y_power2",
+    "trans_z",
+    "trans_z_derivative1",
+    "trans_z_derivative1_power2",
+    "trans_z_power2",
+    "rot_x",
+    "rot_x_derivative1",
+    "rot_x_derivative1_power2",
+    "rot_x_power2",
+    "rot_y",
+    "rot_y_derivative1",
+    "rot_y_derivative1_power2",
+    "rot_y_power2",
+    "rot_z",
+    "rot_z_derivative1",
+    "rot_z_power2",
+    "rot_z_derivative1_power2",
+]
+
+ARPABET_PHONES = [
+    "B",
+    "CH",
+    "D",
+    "DH",
+    "F",
+    "G",
+    "HH",
+    "JH",
+    "K",
+    "L",
+    "M",
+    "N",
+    "NG",
+    "P",
+    "R",
+    "S",
+    "SH",
+    "T",
+    "TH",
+    "V",
+    "W",
+    "Y",
+    "Z",
+    "ZH",
+    "AA",
+    "AE",
+    "AH",
+    "AO",
+    "AW",
+    "AY",
+    "EH",
+    "ER",
+    "EY",
+    "IH",
+    "IY",
+    "OW",
+    "OY",
+    "UH",
+    "UW",
 ]

@@ -2,11 +2,84 @@ from os.path import isfile
 from typing import Tuple
 
 import nibabel as nib
-from neuromaps.datasets import fetch_mni152
+import numpy as np
 from nilearn.datasets import fetch_atlas_schaefer_2018
 from nilearn.image import resample_to_img
 
 DATADIR = "mats"
+
+
+def reduce_voxels(
+    values: np.ndarray,
+    parcellation: np.ndarray = None,
+    agg_func=np.mean,
+    start_label: int = 1,
+) -> np.ndarray:
+    """Reduce voxel-wise data into parcel-level data."""
+    if parcellation is None:
+        parcellation, _ = get_glasser()
+
+    n_parcels = np.unique(parcellation).size
+    parcel_values = np.zeros_like(n_parcels - start_label)
+    for i in range(n_parcels):
+        parcel_mask = parcellation == (i + start_label)
+        parcel_values[i] = agg_func(values[parcel_mask])
+
+    return parcel_values
+
+
+def expand_parcels(
+    values: np.ndarray,
+    parcellation: np.ndarray = None,
+    agg_func=np.mean,
+    start_label: int = 1,
+) -> np.ndarray:
+    """Expand parcel-level values to voxel-level.
+
+    Assigns a voxels' value equal to the parcel value.
+    """
+    if parcellation is None:
+        parcellation, _ = get_glasser()
+
+    n_parcels = np.unique(parcellation).size
+    voxel_values = np.zeros_like(parcellation)
+    for i in range(n_parcels):
+        parcel_mask = parcellation == (i + start_label)
+        voxel_values[parcel_mask] = values[i]
+
+    return voxel_values
+
+
+def parcellate_voxels(
+    values: np.ndarray, parcellation: np.ndarray = None, start_label: int = 1
+) -> np.ndarray:
+    """Aggregate voxel-wise data into parcel-level.
+
+    Assigns a voxel's data point equal to the mean of its parcel.
+    """
+    if parcellation is None:
+        parcellation, _ = get_glasser()
+
+    n_parcels = np.unique(parcellation).size
+    parcel_values = np.zeros_like(values)
+    for i in range(start_label, n_parcels):
+        parcel_mask = parcellation == i
+        parcel_values[parcel_mask] = values[parcel_mask].mean()
+
+    return parcel_values
+
+
+def get_glasser() -> (np.ndarray, dict):
+    """Get the Glasser parcellation labels."""
+    dsegL = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-L_desc-MMP_dseg.label.gii")
+    dsegR = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-R_desc-MMP_dseg.label.gii")
+    lh_parc = dsegL.agg_data()
+    rh_parc = dsegR.agg_data()
+
+    parc_mask = np.hstack((lh_parc, rh_parc))
+    id2label = dsegL.labeltable.get_labels_as_dict()
+
+    return parc_mask, id2label
 
 
 def get_schaefer(

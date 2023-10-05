@@ -20,6 +20,8 @@ scripts
 *.wav
 *.png
 *.npy
+*.npz
+*.pkl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

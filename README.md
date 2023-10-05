@@ -108,7 +108,7 @@ function t2aud() { awk -v OFS="\t" -F"," '{print $10,$11,$8}' "$1" | tail -n +2 
 See `requirements.txt` and:
 
 ```
-pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm
+pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk
 ```
 
 surfplot errors on jupyter

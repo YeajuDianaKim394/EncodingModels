@@ -49,7 +49,7 @@ def word_align(
     return result
 
 
-def align(uttdf: pd.DataFrame, audio_file: Path | str):
+def align(uttdf: pd.DataFrame, audio_file: Path | str) -> pd.DataFrame:
     # Reformat into segments
     uttdf.rename(columns={"onset": "start", "offset": "end"}, inplace=True)
     segments = list(uttdf.to_dict(orient="index").values())
@@ -97,11 +97,6 @@ def main(args: dict):
     for transfn in files:
         transpath = Path.frompath(transfn)
         transpath.update(root="stimuli", datatype="transcript")
-
-        if transpath["conv"] in [114, 132, 166]:
-            continue
-        if transpath["conv"] < 109:
-            continue
 
         uttdf = pd.read_csv(transfn)
         # Fill nan to 180 s per trial

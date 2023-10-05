@@ -5,9 +5,11 @@ from typing import Optional
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from constants import CONFOUNDS, RUN_TRS, RUNS, TR
+from constants import ARPABET_PHONES, CONFOUNDS, PUNCTUATION, RUNS, TR
 from nilearn import signal
 from nilearn.maskers import NiftiLabelsMasker
+from nltk.corpus import cmudict
+from scipy.stats import zscore
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from .atlas import get_schaefer
@@ -40,11 +42,99 @@ class GiftiMasker(BaseEstimator, TransformerMixin):
             gifti = nib.load(gifti_img)
             signals = gifti.agg_data().T  # type:ignore
             images.append(signal.clean(signals, **self.init_args))
-        return np.hstack(images)
+
+        signals = np.hstack(images)
+
+        return signals
+
+
+def get_button_presses(subject: int, condition: str = "G"):
+    # Load timings.
+    timingpath = Path(
+        root="stimuli",
+        conv=get_conv(subject),
+        datatype="timing",
+        run=1,
+        suffix="events",
+        ext=".csv",
+    )
+    dfs = []
+    for run in RUNS:
+        timingpath = timingpath.update(run=run)
+        dft = pd.read_csv(timingpath)
+        dfs.append(dft)
+    dft = pd.concat(dfs).reset_index(drop=True)
+    dft = dft[["run", "trial", "condition", "role", "comm.time"]]
+    dft = dft[dft.condition == condition]
+    dft.dropna(subset=["comm.time"], inplace=True)
+
+    # the speaker always presses. speaker == subject if subject > 100
+    # a button press occurs when switching from speaker to listener for sub > 100
+    # so, at the time stamps of listener start
+    role = "speaker" if subject > 100 else "listener"
+    press_role = "listener" if subject > 100 else "speaker"
+    presses = []
+    switches = []
+    for _, group in dft.groupby(["run", "trial"]):
+        # button press osnets
+        onsets = group[group.role == press_role]["comm.time"]
+        onsets = np.floor(onsets.values / TR).astype(int)
+        trial_press = np.zeros(120, dtype=int)
+        trial_press[onsets] = 1
+        presses.append(trial_press)
+
+        # switch onsets
+        onsets = np.floor(group["comm.time"].values / TR).astype(int)
+        trial_switches = np.zeros(120, dtype=int)
+        s = 1 if group.iloc[0].role == role else 0
+        for i in range(len(onsets) - 1):
+            trial_switches[onsets[i] : onsets[i + 1]] = (i + s) % 2
+        switches.append(trial_switches)
+
+    presses = np.concatenate(presses)
+    switches = np.concatenate(switches)
+
+    return presses, switches  # , dft
+
+
+def word_to_phones(dfemb: pd.DataFrame) -> pd.DataFrame:
+    arpabet = cmudict.dict()
+
+    phone_set = ARPABET_PHONES
+    phonedict = {ph: i for i, ph in enumerate(phone_set)}
+
+    def get_word_phone_emb(word):
+        emb = np.zeros(len(phone_set))
+        if phones := arpabet.get(word.lower()):
+            for phone in phones[0]:
+                emb[phonedict[phone.strip("012")]] = 1
+        return emb
+
+    dfword = dfemb.groupby(["run", "trial", "word_idx"]).first()
+    dfword.reset_index(inplace=True)
+
+    phone_emb = dfword.word.str.strip(PUNCTUATION).apply(get_word_phone_emb)
+    embeddings = np.vstack(phone_emb.values)
+
+    # remove any uninformative dimensions
+    embeddings = embeddings[:, embeddings.sum(0) > 0]
+    dfword["embedding"] = embeddings.tolist()
+    dfword.drop(
+        ["hftoken", "token_id", "rank", "true_prob", "top_pred", "entropy"],
+        axis=1,
+        inplace=True,
+    )
+
+    return dfword
 
 
 def get_bold(
-    subject: int, condition: str = "G", space: str = "fsaverage6"
+    subject: int,
+    condition: str = "G",
+    space: str = "fsaverage6",
+    confounds: list[str] = CONFOUNDS,
+    ensure_finite: bool = True,
+    return_cofounds: list[str] = [],
 ) -> np.ndarray:
     """Return BOLD data for subject from all runs and trials."""
     conv = get_conv(subject)
@@ -100,6 +190,7 @@ def get_bold(
     if space.startswith("fsaverage"):
         masker = GiftiMasker(
             t_r=TR,
+            ensure_finite=True,
             standardize=True,
             standardize_confounds=True,
         )
@@ -117,6 +208,7 @@ def get_bold(
 
     # Get the brain data per run, also removes confounds and applies
     bold_trials = []
+    conf_trials = []
     for run in RUNS:
         boldpath = boldpath.update(run=run)
 
@@ -125,13 +217,14 @@ def get_bold(
         if is_surface:
             del confoundpath["hemi"]
         confoundpath.update(desc="confounds", suffix="timeseries", ext=".tsv")
-        confounds = pd.read_csv(confoundpath, sep="\t", usecols=CONFOUNDS).to_numpy()
-
-        # Mask for the two trials for this run that are generate condition
-        use_trials = dft2[dft2.run == run].trial.to_numpy(dtype=int)
-        conv_mask = np.zeros(RUN_TRS, dtype=bool)
-        for trial in use_trials:
-            conv_mask[trial_masks[trial]] = True
+        conf_data = pd.read_csv(confoundpath, sep="\t", usecols=confounds)
+        conf_data.dropna(axis=1, how="any", inplace=True)
+        conf_data = conf_data.to_numpy()
+        conf_ret = pd.read_csv(
+            confoundpath,
+            sep="\t",
+            usecols=return_cofounds,
+        ).to_numpy()
 
         boldpaths = boldpath
         if is_surface:
@@ -142,11 +235,26 @@ def get_bold(
             warnings.simplefilter(action="ignore", category=FutureWarning)
             bold = masker.fit_transform(
                 boldpaths,  # type: ignore
-                confounds=confounds,
+                confounds=conf_data if len(confounds) else None,
             )
-            bold_trials.append(bold[conv_mask])
 
+        # Mask for the two trials for this run that are generate condition
+        use_trials = dft2[dft2.run == run].trial.to_numpy(dtype=int)
+        for trial in use_trials:
+            trial_slice = trial_masks[trial]
+            # bold_trials.append(zscore(bold[trial_slice], axis=0))
+            conf_trials.append(conf_ret[trial_slice])
+
+    all_bold = None
     all_bold = np.vstack(bold_trials)
+    if ensure_finite:
+        mask = np.logical_not(np.isfinite(all_bold))
+        if mask.any():
+            all_bold[mask] = 0
+
+    if len(return_cofounds):
+        return all_bold, np.vstack(conf_trials)
+
     return all_bold
 
 
