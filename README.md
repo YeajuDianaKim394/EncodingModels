@@ -108,7 +108,7 @@ function t2aud() { awk -v OFS="\t" -F"," '{print $10,$11,$8}' "$1" | tail -n +2 
 See `requirements.txt` and:
 
 ```
-pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk
+pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk statsmodels h5py netneurotools
 ```
 
 surfplot errors on jupyter
@@ -128,4 +128,15 @@ wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_MD_HE197.txt
 wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_language_SN220.nii
 wget https://web.mit.edu/evlab//assets/funcloc_assets/allParcels_language_SN220.txt
 wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/MNI/Schaefer2018_1000Parcels_Kong2022_17Networks_order_FSLMNI152_1mm.nii.gz
+ ```
+
+ surf.py:300 to be able to plot a 2D map
+ ```
+298                     if hasattr(cm, '_lut'):
+  1                         table = cm._lut * 255
+  2                     else:
+  3                         # nvals = lut['numberOfTableValues']
+  4                         nvals = cm.N
+  5                         table = cm(np.linspace(0, 1, nvals)) * 255
+  6                     table = table.astype(np.uint8)
  ```

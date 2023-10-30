@@ -1,22 +1,28 @@
 """
-Run 
-"""
-import pickle
-from argparse import ArgumentParser
-from datetime import datetime
+Run an encoding model on BOLD data.
 
+https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/03_plot_wordnet_model.html
+https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/06_plot_banded_ridge_model.html
+"""
+from argparse import ArgumentParser
+from collections import defaultdict
+from datetime import datetime
+from glob import glob
+
+import h5py
 import numpy as np
 import torch
 from constants import CONV_TRS, RUNS, TR
 from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score, correlation_score_split
+from scipy.ndimage import binary_dilation
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from util.path import Path
-from util.subject import get_bold, get_button_presses, get_transcript, word_to_phones
+from util.subject import get_bold, get_button_presses, get_transcript
 
 
 class Caster(BaseEstimator, TransformerMixin):
@@ -72,12 +78,14 @@ class SplitDelayer(BaseEstimator, TransformerMixin):
 def build_regressors(subject: int, modelname: str):
     conv = str(subject + 100 if subject < 100 else subject)
     dfemb = get_transcript(conv=conv, modelname=modelname)
-    dfphone = word_to_phones(dfemb)
+    dfphone = get_transcript(conv=conv, modelname="articulatory")
 
     # Build regressors per TR
     X = []
     dim_lexemb = 0
     dim_phoemb = 0
+    dim_audemb = 80
+    audio_emb = []
 
     # For each trial, create a feature for each TR
     for (run, trial), subdf in dfemb.groupby(["run", "trial"]):
@@ -99,6 +107,11 @@ def build_regressors(subject: int, modelname: str):
         comp_phoemb = np.zeros((CONV_TRS, dim_phoemb))
         is_prod_pho = subdf_phones.speaker == subject
         is_comp_pho = subdf_phones.speaker != subject
+
+        audpath = Path(root="features", datatype="spectrogram", ext=".npy")
+        audpath.update(conv=conv, run=run, trial=trial)
+        filename = glob(audpath.starstr(["conv", "datatype"]))[0]
+        audio_emb.append(np.load(filename))
 
         # Go through one TR at a time and find words that fall within this TR
         # average their embeddings, get num of words, etc
@@ -144,7 +157,6 @@ def build_regressors(subject: int, modelname: str):
                     axis=0, keepdims=True
                 )
 
-        # Convolve prod/comp indicators
         x_trial = np.hstack(
             (
                 in_prod,
@@ -164,22 +176,60 @@ def build_regressors(subject: int, modelname: str):
     X = np.vstack(X)
 
     presses, switches = get_button_presses(subject)
-    X = np.hstack((presses.reshape(-1, 1), switches.reshape(-1, 1), X))
+    presses = binary_dilation(presses)
 
-    n_nuisance = 4
-    n_rates = 4
+    audio_emb = np.vstack(audio_emb)
+    prod_audemb = np.zeros_like(audio_emb)
+    comp_audemb = np.zeros_like(audio_emb)
+    pmask = switches.astype(bool)
+    prod_audemb[pmask] = audio_emb[pmask]
+    comp_audemb[~pmask] = audio_emb[~pmask]
+
+    X = np.hstack(
+        (
+            presses.reshape(-1, 1),
+            switches.reshape(-1, 1),
+            (1 - switches).reshape(-1, 1),
+            X[:, :6],
+            prod_audemb,
+            comp_audemb,
+            X[:, 6:],
+        )
+    )
+
+    n_nuisance = 8
     n_phodims = dim_phoemb * 2
+    n_spedims = dim_audemb * 2
     n_lexdims = dim_lexemb
 
-    feat_dims = [0, n_nuisance, n_rates, n_phodims, n_lexdims, n_lexdims]
+    feat_dims = [0, n_nuisance, n_spedims, n_phodims, n_lexdims, n_lexdims]
     featdim_cs = np.cumsum(feat_dims)
-    features = ["nuisance", "wp_rate", "phonemes", "production", "comprehension"]
+    features = ["nuisance", "spectral", "phonemes", "production", "comprehension"]
 
     slices = {}
     for i, feat in enumerate(features, 1):
         slices[feat] = slice(featdim_cs[i - 1], featdim_cs[i])
 
     return X, slices
+
+
+def compress_regressors(X: np.ndarray, features: dict) -> (np.ndarray, dict):
+    """Compress regressors across production and comprehension,
+
+    removing this distinction."""
+    x_nuis = X[:, [0, 1, 2]]
+    x_in = X[:, 2:4].sum(axis=1, keepdims=True)
+    x_wr = X[:, 4:6].sum(axis=1, keepdims=True)
+    x_pr = X[:, 6:8].sum(axis=1, keepdims=True)
+    x_ph = X[:, 8:47] + X[:, 47:86]
+    x_lx = X[:, features["production"]] + X[:, features["comprehension"]]
+    Xnew = np.hstack((x_nuis, x_in, x_wr, x_pr, x_ph, x_lx))
+    features_new = dict(
+        nuisance=slice(0, 6),
+        phonemes=slice(6, 45),
+        lexical=slice(45, 1069),
+    )
+    return Xnew, features_new
 
 
 def build_model(
@@ -189,6 +239,8 @@ def build_model(
     verbose: int,
     n_jobs: int,
 ):
+    """Build the pipeline"""
+
     # Set up modeling pipeline
     preprocess_pipeline = make_pipeline(
         StandardScaler(with_mean=True, with_std=False),
@@ -203,7 +255,9 @@ def build_model(
     ]
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
-    params = dict(alphas=alphas, progress_bar=verbose, diagonalize_method="svd")
+    params = dict(
+        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=200
+    )
     mkr_model = MultipleKernelRidgeCV(kernels="precomputed", solver_params=params)
     pipeline = make_pipeline(
         column_kernelizer,
@@ -218,15 +272,8 @@ def main(args):
     sub = args.subject
     modelname = args.model
 
-    # Run encoding
-    cv_scores = []
-    cv_scores_prod = []
-    cv_scores_comp = []
-    cv_models = []
-    cv_alphas = []
-    cv_preds = []
-
     X, features = build_regressors(sub, modelname)
+    # X, features = compress_regressors(X, features)
     X = X.astype(np.float32)
     feature_names = list(features.keys())
     slices = list(features.values())
@@ -234,13 +281,11 @@ def main(args):
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
 
     print(datetime.now(), "Get BOLD")
-    # Y_bold, fw_displacement = get_bold(
-    #     sub, space="fsaverage6", return_cofounds=["framewise_displacement"]
-    # )
     Y_bold = get_bold(sub, space="fsaverage6")
 
     delayer = SplitDelayer(delays=[2, 3, 4, 5])
 
+    results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
     for k, (train_index, test_index) in enumerate(kfold.split()):
@@ -264,29 +309,64 @@ def main(args):
         scores_split = correlation_score_split(Y_test, Y_preds)
 
         # Compute correlation based on masked prod/comp
-        prod_mask = delayer.fit_transform(X_test[:, 2:3]).any(-1)
-        comp_mask = delayer.fit_transform(X_test[:, 3:4]).any(-1)
+        prod_mask = delayer.fit_transform(X_test[:, 1:2]).any(-1)
+        comp_mask = delayer.fit_transform(X_test[:, 2:3]).any(-1)
         scores_prod = correlation_score(Y_test[prod_mask], Y_preds[-2, prod_mask])
         scores_comp = correlation_score(Y_test[comp_mask], Y_preds[-1, comp_mask])
 
-        enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
-        cv_models.append(enc_model)
-        cv_scores.append(scores_split.numpy(force=True))
-        cv_scores_prod.append(scores_prod.numpy(force=True))
-        cv_scores_comp.append(scores_comp.numpy(force=True))
-        cv_alphas.append(enc_model.best_alphas_.numpy(force=True))
-        cv_preds.append(Y_preds.numpy(force=True))
+        # test generalization from left to right hemisphere
 
-    result = {
-        "cv_scores": cv_scores,
-        "cv_scores_prod": cv_scores_prod,
-        "cv_scores_comp": cv_scores_comp,
-        "cv_alphas": cv_alphas,
-        "cv_preds": cv_preds,
-        "in_prod": X[:, 0].astype(bool),
-        "in_comp": X[:, 1].astype(bool),
-        "cv_models": cv_models,
-    }
+        # test production model on comprehension embeddings and time points
+
+        enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
+        # Xfit = pipeline["columnkernelizer"].get_X_fit()
+        # weights = enc_model.get_primal_coef(Xfit)
+
+        # fix bad norms.. see https://github.com/numpy/numpy/issues/5697
+        # and https://stackoverflow.com/a/69788061
+
+        # fs_mask = None
+        # weights_prod = weights[-2][..., fs_mask]
+        # scale = torch.max(torch.abs(weights_prod), dim=0).values
+        # norms = torch.linalg.vector_norm(weights_prod * scale, dim=0, keepdims=True) / scale
+        # for i in torch.where(norms == 0)[1]: norms[0, i] = torch.linalg.vector_norm(weights_prod[:, i])
+        # weights_prod /= norms
+        # weights_prod *= torch.sqrt(torch.clip(scores_prod[fs_mask].cpu(), min=0))
+        # # weights_prod_delay = torch.stack(torch.split(weights_prod, 4, dim=0))
+        # weights_prod_delay = weights_prod.reshape(len(weights_prod), 4, -1)
+        # weights_prod = weights_prod_delay.mean(1)
+        # if torch.isnan(weights_prod).any() or torch.isinf(weights_prod).any():
+        #     print("nan inf prod")
+        #     breakpoint()
+
+        # def pbad(v, backend=torch):
+        #     print(backend.isnan(v).any(), backend.isinf(v).any())
+
+        # weights_comp = weights[-1][..., fs_mask]
+        # norms = torch.linalg.vector_norm(weights_comp, dim=0, keepdims=True)
+        # for i in torch.where(norms == 0)[1]:
+        #     norms[0, i] = torch.linalg.vector_norm(weights_comp[:, i])
+        # # there are still 0's possibly
+        # weights_comp /= norms  # NOTE TODO can introduce inf
+        # weights_comp *= torch.sqrt(torch.clip(scores_comp[fs_mask].cpu(), min=0))
+        # weights_comp_delay = weights_comp.reshape(len(weights_comp), 4, -1)
+        # weights_comp = weights_comp_delay.mean(1)
+        # if torch.isnan(weights_comp).any() or torch.isinf(weights_comp).any():
+        #     print("nan inf comp")
+        #     breakpoint()
+
+        # results["cv_weights_prod"].append(weights_prod)
+        # results["cv_weights_comp"].append(weights_comp)
+        results["cv_scores"].append(scores_split.numpy(force=True))
+        results["cv_scores_prod"].append(scores_prod.numpy(force=True))
+        results["cv_scores_comp"].append(scores_comp.numpy(force=True))
+        results["cv_alphas"].append(enc_model.best_alphas_.numpy(force=True))
+        results["cv_preds"].append(Y_preds.numpy(force=True))
+
+    # stack across folds
+    result = {k: np.stack(v) for k, v in results.items()}
+    result["in_prod"] = X[:, 1].astype(bool)
+    result["in_comp"] = X[:, 2].astype(bool)
 
     return result
 
@@ -299,9 +379,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
+    parser.add_argument("--suffix", type=str, default="")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
-    args.alphas = np.logspace(-1, 8, 10)
+    args.alphas = np.logspace(0, 19, 20)
     print(datetime.now(), "Start")
 
     if args.cuda > 0:
@@ -314,11 +395,12 @@ if __name__ == "__main__":
 
     print(datetime.now(), "Saving")
     pklpath = Path(
-        root="encoding",
+        root=f"encoding{args.suffix}",
         sub=f"{args.subject:03d}",
         datatype=args.model,
-        ext=".pkl",
+        ext=".hdf5",
     )
     pklpath.mkdirs()
-    with open(pklpath.fpath, "wb") as f:
-        pickle.dump(result, f)
+    with h5py.File(pklpath, "w") as f:
+        for key, value in result.items():
+            f.create_dataset(name=key, data=value)

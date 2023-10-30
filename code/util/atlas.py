@@ -1,120 +1,86 @@
-from os.path import isfile
-from typing import Tuple
-
 import nibabel as nib
 import numpy as np
-from nilearn.datasets import fetch_atlas_schaefer_2018
-from nilearn.image import resample_to_img
+from netneurotools import datasets as nntdata
+from neuromaps.images import annot_to_gifti
 
 DATADIR = "mats"
 
 
-def reduce_voxels(
-    values: np.ndarray,
-    parcellation: np.ndarray = None,
-    agg_func=np.mean,
-    start_label: int = 1,
-) -> np.ndarray:
-    """Reduce voxel-wise data into parcel-level data."""
-    if parcellation is None:
-        parcellation, _ = get_glasser()
+class Atlas:
+    def __init__(self, name: str, label_img: np.ndarray, labels: dict):
+        self.name = name
+        self.label_img = label_img
+        self.id2label = labels
+        self.label2id = {v: k for k, v in labels.items()}
 
-    n_parcels = np.unique(parcellation).size
-    parcel_values = np.zeros_like(n_parcels - start_label)
-    for i in range(n_parcels):
-        parcel_mask = parcellation == (i + start_label)
-        parcel_values[i] = agg_func(values[parcel_mask])
+    def label(self, key: int) -> str:
+        return self.id2label.get(key)
 
-    return parcel_values
+    def key(self, label: str) -> int:
+        return self.label2id.get(label)
 
+    def __getitem__(self, key) -> str | int:
+        if isinstance(key, int):
+            return self.label(key)
+        elif isinstance(key, str):
+            return self.key(key)
+        else:
+            raise ValueError("key is incorrect type")
 
-def expand_parcels(
-    values: np.ndarray,
-    parcellation: np.ndarray = None,
-    agg_func=np.mean,
-    start_label: int = 1,
-) -> np.ndarray:
-    """Expand parcel-level values to voxel-level.
+    def __len__(self) -> int:
+        return len(self.id2label) - 1
 
-    Assigns a voxels' value equal to the parcel value.
-    """
-    if parcellation is None:
-        parcellation, _ = get_glasser()
+    def vox_to_parc(
+        self, values: np.ndarray, agg_func=np.mean, axis: int = -1
+    ) -> np.ndarray:
+        n_parcels = len(self)
+        parcellation = self.label_img
 
-    n_parcels = np.unique(parcellation).size
-    voxel_values = np.zeros_like(parcellation)
-    for i in range(n_parcels):
-        parcel_mask = parcellation == (i + start_label)
-        voxel_values[parcel_mask] = values[i]
+        if values.ndim == 1:
+            values = values[np.newaxis, :]
 
-    return voxel_values
+        new_shape = list(values.shape)
+        new_shape[axis] = n_parcels
+        parcel_values = np.zeros(new_shape, dtype=values.dtype)
+        for i in range(1, n_parcels + 1):
+            parcel_mask = parcellation == i
+            parcel_values[:, i - 1] = agg_func(values[:, parcel_mask], axis=axis)
+        return parcel_values
 
+    def parc_to_vox(self, values: np.ndarray) -> np.ndarray:
+        parcellation = self.label_img
+        voxel_values = np.zeros_like(self.label_img, dtype=values.dtype)
+        for i in range(1, len(self)):
+            parcel_mask = parcellation == i
+            voxel_values[parcel_mask] = values[0, i]  # NOTE
 
-def parcellate_voxels(
-    values: np.ndarray, parcellation: np.ndarray = None, start_label: int = 1
-) -> np.ndarray:
-    """Aggregate voxel-wise data into parcel-level.
+        return voxel_values
 
-    Assigns a voxel's data point equal to the mean of its parcel.
-    """
-    if parcellation is None:
-        parcellation, _ = get_glasser()
+    def parcellate(self, values: np.ndarray, **kwargs) -> np.ndarray:
+        return self.parc_to_vox(self.vox_to_parc(values, **kwargs))
 
-    n_parcels = np.unique(parcellation).size
-    parcel_values = np.zeros_like(values)
-    for i in range(start_label, n_parcels):
-        parcel_mask = parcellation == i
-        parcel_values[parcel_mask] = values[parcel_mask].mean()
+    def get_background_mask(self) -> np.ndarray:
+        return self.label_img == 0
 
-    return parcel_values
-
-
-def get_glasser() -> (np.ndarray, dict):
-    """Get the Glasser parcellation labels."""
-    dsegL = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-L_desc-MMP_dseg.label.gii")
-    dsegR = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-R_desc-MMP_dseg.label.gii")
-    lh_parc = dsegL.agg_data()
-    rh_parc = dsegR.agg_data()
-
-    parc_mask = np.hstack((lh_parc, rh_parc))
-    id2label = dsegL.labeltable.get_labels_as_dict()
-
-    return parc_mask, id2label
-
-
-def get_schaefer(
-    n_rois: int = 1000,
-    n_networks: int = 17,
-    density: int = 3,
-    force_resample: bool = False,
-) -> Tuple[str, list[str]]:
-    """Get the schaefer atlas resampled to our MNI space and resolution."""
-    filepath = (
-        f"{DATADIR}/Schaefer2018_{n_rois}Parcels_{n_networks}Networks"
-        f"_order_FSLMNI152_{density}mm.nii.gz"
-    )
-
-    # Get the requested schaefer atlas
-    schaefer = fetch_atlas_schaefer_2018(
-        n_rois=n_rois,
-        yeo_networks=n_networks,
-        resolution_mm=1,
-        data_dir=DATADIR,
-    )
-    labels = [s.decode() for s in schaefer["labels"].tolist()]
-
-    if not isfile(filepath) or force_resample:
-        # Get MNI mask
-        # mni_atlases = fetch_mni152(density=f"{density}mm", data_dir=DATADIR)
-        # brain_mask = mni_atlases["2009cAsym_brainmask"]
-        brain_mask = (
-            "data/derivatives/fmriprep/sub-004/ses-1/func/sub-004_ses-1_task-"
-            "Conv_run-1_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    @staticmethod
+    def schaefer2018(rois: int = 1000, networks: int = 17):
+        filenames = nntdata.fetch_schaefer2018(version="fsaverage6", data_dir=DATADIR)
+        atlasname = f"{rois}Parcels{networks}Networks"
+        atlas_bunch = filenames[atlasname]
+        gLh, gRh = annot_to_gifti((atlas_bunch.lh, atlas_bunch.rh))
+        label_img = np.concatenate((gLh.agg_data(), gRh.agg_data()))
+        labels = (
+            gLh.labeltable.get_labels_as_dict() | gRh.labeltable.get_labels_as_dict()
         )
+        return Atlas(atlasname, label_img, labels)
 
-        # Resample schaefer to MNI
-        schaefer_atlas = schaefer["maps"]
-        resampled = resample_to_img(schaefer_atlas, brain_mask, interpolation="nearest")
-        nib.save(resampled, filepath)
-
-    return filepath, labels
+    @staticmethod
+    def glasser2016():
+        atlasname = "glasser2016"
+        gLh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-L_desc-MMP_dseg.label.gii")
+        gRh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-R_desc-MMP_dseg.label.gii")
+        label_img = np.concatenate((gLh.agg_data(), gRh.agg_data()))
+        labels = (
+            gLh.labeltable.get_labels_as_dict() | gRh.labeltable.get_labels_as_dict()
+        )
+        return Atlas(atlasname, label_img, labels)

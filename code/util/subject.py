@@ -5,14 +5,11 @@ from typing import Optional
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from constants import ARPABET_PHONES, CONFOUNDS, PUNCTUATION, RUNS, TR
+from constants import CONFOUNDS, RUNS, TR
 from nilearn import signal
-from nilearn.maskers import NiftiLabelsMasker
-from nltk.corpus import cmudict
 from scipy.stats import zscore
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from .atlas import get_schaefer
 from .path import Path
 
 
@@ -97,37 +94,6 @@ def get_button_presses(subject: int, condition: str = "G"):
     return presses, switches  # , dft
 
 
-def word_to_phones(dfemb: pd.DataFrame) -> pd.DataFrame:
-    arpabet = cmudict.dict()
-
-    phone_set = ARPABET_PHONES
-    phonedict = {ph: i for i, ph in enumerate(phone_set)}
-
-    def get_word_phone_emb(word):
-        emb = np.zeros(len(phone_set))
-        if phones := arpabet.get(word.lower()):
-            for phone in phones[0]:
-                emb[phonedict[phone.strip("012")]] = 1
-        return emb
-
-    dfword = dfemb.groupby(["run", "trial", "word_idx"]).first()
-    dfword.reset_index(inplace=True)
-
-    phone_emb = dfword.word.str.strip(PUNCTUATION).apply(get_word_phone_emb)
-    embeddings = np.vstack(phone_emb.values)
-
-    # remove any uninformative dimensions
-    embeddings = embeddings[:, embeddings.sum(0) > 0]
-    dfword["embedding"] = embeddings.tolist()
-    dfword.drop(
-        ["hftoken", "token_id", "rank", "true_prob", "top_pred", "entropy"],
-        axis=1,
-        inplace=True,
-    )
-
-    return dfword
-
-
 def get_bold(
     subject: int,
     condition: str = "G",
@@ -135,9 +101,29 @@ def get_bold(
     confounds: list[str] = CONFOUNDS,
     ensure_finite: bool = True,
     return_cofounds: list[str] = [],
+    use_cache: bool = False,
+    save_data: bool = False,
 ) -> np.ndarray:
     """Return BOLD data for subject from all runs and trials."""
     conv = get_conv(subject)
+
+    cachepath = Path(
+        root="data/derivatives/cleaned",
+        sub=f"{subject:03d}",
+        datatype="func",
+        task="Conv",
+        space=space,
+        suffix="bold",
+        ext=".npy",
+    )
+    cachepath.mkdirs()
+    if use_cache and cachepath.isfile():
+        bold = np.load(cachepath)
+        if return_cofounds:
+            cachepath.update(suffix="confounds")
+            conf = np.load(cachepath)
+            return bold, conf
+        return bold
 
     # Load timings. We need this to know which trials are generate condition
     timingpath = Path(
@@ -195,16 +181,7 @@ def get_bold(
             standardize_confounds=True,
         )
     else:
-        atlas, _ = get_schaefer(n_rois=1000)
-        masker = NiftiLabelsMasker(
-            t_r=TR,
-            labels_img=atlas,
-            strategy="mean",
-            standardize=True,
-            standardize_confounds=True,
-            reports=False,
-            resampling_target=None,  # type: ignore
-        )
+        raise NotImplementedError()
 
     # Get the brain data per run, also removes confounds and applies
     bold_trials = []
@@ -242,7 +219,7 @@ def get_bold(
         use_trials = dft2[dft2.run == run].trial.to_numpy(dtype=int)
         for trial in use_trials:
             trial_slice = trial_masks[trial]
-            # bold_trials.append(zscore(bold[trial_slice], axis=0))
+            bold_trials.append(zscore(bold[trial_slice], axis=0))
             conf_trials.append(conf_ret[trial_slice])
 
     all_bold = None
@@ -251,9 +228,15 @@ def get_bold(
         mask = np.logical_not(np.isfinite(all_bold))
         if mask.any():
             all_bold[mask] = 0
+    if save_data:
+        np.save(cachepath, all_bold)
 
     if len(return_cofounds):
-        return all_bold, np.vstack(conf_trials)
+        confs = np.vstack(conf_trials)
+        if save_data:
+            cachepath.update(suffix="confounds")
+            conf = np.save(cachepath, confs)
+        return all_bold, confs
 
     return all_bold
 
@@ -268,7 +251,7 @@ def get_transcript(
         conv = get_conv(subject)
 
     embpath = Path(
-        root="embeddings",
+        root="features",
         conv=conv,
         datatype=modelname,
         ext=".pkl",

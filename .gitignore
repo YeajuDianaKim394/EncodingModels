@@ -6,6 +6,8 @@ embeddings*
 staging*
 encoding*
 aligned*
+features
+figures
 logs
 mats
 scripts
