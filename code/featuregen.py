@@ -3,21 +3,69 @@
 """
 
 from glob import glob
-from io import StringIO
 
 import numpy as np
 import pandas as pd
-from constants import ARPABET_PHONES, FNKEYS, PUNCTUATION
-from nltk.corpus import cmudict
+from constants import (
+    ARPABET_PHONES,
+    CONVS_FRIENDS,
+    CONVS_STRANGERS,
+    FNKEYS,
+    MOTION_CONFOUNDS,
+    PUNCTUATION,
+    RUN_TRIAL_SLICE,
+    RUNS,
+    SUBS_FRIENDS,
+    SUBS_STRANGERS,
+    TRIALS,
+)
 from tqdm import tqdm
-from transformers import AutoFeatureExtractor
 from util.path import Path
-from whisperx import load_audio
+from util.subject import get_trials
 
-SAMPLING_RATE = 16000.0
+
+def confounds(args):
+    confpath = Path(
+        root="data/derivatives/fmriprep",
+        sub="000",
+        ses="1",
+        datatype="func",
+        task="Conv",
+        run=1,
+        desc="confounds",
+        suffix="timeseries",
+        ext=".tsv",
+    )
+
+    confounds = MOTION_CONFOUNDS
+    print(len(confounds))
+
+    outpath = Path(
+        root="features", sub="000", datatype="motion", run=0, trial=0, ext="npy"
+    )
+
+    for sub in tqdm(args.subs):
+        substr = f"{sub:03d}"
+        confpath.update(sub=substr)
+        rt_dict = get_trials(sub, condition="G")
+        for run in args.runs:
+            confpath.update(run=run)
+            trials = rt_dict[run]
+            for trial in trials:
+                df = pd.read_csv(confpath, sep="\t", usecols=confounds)
+                conv_slice = RUN_TRIAL_SLICE[trial]
+                conf_data = df.iloc[conv_slice].to_numpy()
+
+                outpath.update(sub=substr, run=run, trial=trial)
+                outpath.mkdirs()
+                np.save(outpath, conf_data)
 
 
 def phonemes(args, mode="articulatory"):
+    from io import StringIO
+
+    from nltk.corpus import cmudict
+
     arpabet = cmudict.dict()
     phone_set = ARPABET_PHONES
     phonedict = {ph: i for i, ph in enumerate(phone_set)}
@@ -112,8 +160,8 @@ UW,vowel,,,,high,back,,"""
         phone_emb = df.word.str.strip(PUNCTUATION).apply(func)
         embeddings = np.vstack(phone_emb.values)
 
-        # remove any uninformative dimensions
-        embeddings = embeddings[:, embeddings.sum(0) > 0]
+        # remove any uninformative dimensions or not
+        # embeddings = embeddings[:, embeddings.sum(0) > 0]
         df["embedding"] = embeddings.tolist()
 
         transpath.update(root="features", datatype=mode, ext=".pkl")
@@ -123,6 +171,19 @@ UW,vowel,,,,high,back,,"""
 
 def spectral(args):
     """Move and process transcripts."""
+    from transformers import AutoFeatureExtractor
+    from whisperx import load_audio
+
+    SAMPLING_RATE = 16000.0
+
+    # audiopath = Path(
+    #     root="stimuli",
+    #     sub="000",
+    #     datatype="audio",
+    #     task="Conv",
+    #     run=1,
+    #     ext=".wav",
+    # )
 
     # Look for audio files
     audiopath = Path(root="stimuli", datatype="audio", ext=".wav")
@@ -133,6 +194,15 @@ def spectral(args):
     assert len(files), "No files found for: " + search_str
 
     feature_extractor = AutoFeatureExtractor.from_pretrained("openai/whisper-tiny")
+
+    # for sub in tqdm(args.subs):
+    #     substr = f"{sub:03d}"
+    #     confpath.update(sub=substr)
+    #     rt_dict = get_trials(sub, condition="G")
+    #     for run in args.runs:
+    #         confpath.update(run=run)
+    #         trials = rt_dict[run]
+    #         for trial in trials:
 
     for filename in tqdm(files):
         audiopath = Path.frompath(filename)
@@ -151,19 +221,42 @@ def spectral(args):
         np.save(audiopath, features.T)
 
 
+def cache(args):
+    from util.subject import get_bold
+
+    confounds = MOTION_CONFOUNDS + ["framewise_displacement"]
+    for sub in tqdm(args.subs):
+        _ = get_bold(sub, save_data=True, return_cofounds=confounds)
+
+
 if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
     parser.add_argument("feature", type=str)
-    parser.add_argument("-c", "--conv", type=int)
-    parser.add_argument("-r", "--run", type=int)
-    parser.add_argument("-t", "--trial", type=int)
+    parser.add_argument("-s", "--subs", type=str, default=SUBS_STRANGERS)
+    parser.add_argument("-c", "--convs", type=str, default=CONVS_STRANGERS)
+    parser.add_argument("-r", "--runs", nargs="*", type=int, default=RUNS)
+    parser.add_argument("-t", "--trials", nargs="*", type=int, default=TRIALS)
     args = parser.parse_args()
+
+    if args.convs == "strangers":
+        args.convs = CONVS_STRANGERS
+    elif args.convs == "friends":
+        args.convs = CONVS_FRIENDS
+
+    if args.subs == "strangers":
+        args.subs = SUBS_STRANGERS
+    elif args.subs == "friends":
+        args.subs = SUBS_FRIENDS
 
     if args.feature == "spectral":
         spectral(args)
     elif args.feature == "phonemes":
         phonemes(args)
+    elif args.feature == "confounds":
+        confounds(args)
+    elif args.feature == "cache":
+        cache(args)
     else:
         raise ValueError(f"Unknown feature set: {args.feature}")

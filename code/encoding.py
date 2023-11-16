@@ -85,7 +85,9 @@ def build_regressors(subject: int, modelname: str):
     dim_lexemb = 0
     dim_phoemb = 0
     dim_audemb = 80
+    dim_conemb = 24
     audio_emb = []
+    conf_emb = []
 
     # For each trial, create a feature for each TR
     for (run, trial), subdf in dfemb.groupby(["run", "trial"]):
@@ -112,6 +114,11 @@ def build_regressors(subject: int, modelname: str):
         audpath.update(conv=conv, run=run, trial=trial)
         filename = glob(audpath.starstr(["conv", "datatype"]))[0]
         audio_emb.append(np.load(filename))
+
+        confpath = Path(root="features", datatype="motion", ext=".npy")
+        modtrial = ((trial - 1) % 4) + 1
+        confpath.update(sub=f"{subject:03d}", run=run, trial=modtrial)
+        conf_emb.append(np.load(confpath))
 
         # Go through one TR at a time and find words that fall within this TR
         # average their embeddings, get num of words, etc
@@ -175,15 +182,25 @@ def build_regressors(subject: int, modelname: str):
 
     X = np.vstack(X)
 
+    # get additional nuisance variables
     presses, switches = get_button_presses(subject)
     presses = binary_dilation(presses)
 
+    pmask = switches.astype(bool)
+
+    # split spectral embeddings
     audio_emb = np.vstack(audio_emb)
     prod_audemb = np.zeros_like(audio_emb)
     comp_audemb = np.zeros_like(audio_emb)
-    pmask = switches.astype(bool)
     prod_audemb[pmask] = audio_emb[pmask]
     comp_audemb[~pmask] = audio_emb[~pmask]
+
+    # split motion embeddings
+    conf_emb = np.vstack(conf_emb)
+    prod_confemb = np.zeros_like(conf_emb)
+    comp_confemb = np.zeros_like(conf_emb)
+    prod_confemb[pmask] = conf_emb[pmask]
+    comp_confemb[~pmask] = conf_emb[~pmask]
 
     X = np.hstack(
         (
@@ -191,21 +208,30 @@ def build_regressors(subject: int, modelname: str):
             switches.reshape(-1, 1),
             (1 - switches).reshape(-1, 1),
             X[:, :6],
+            prod_confemb,
+            comp_confemb,
             prod_audemb,
             comp_audemb,
             X[:, 6:],
         )
     )
 
-    n_nuisance = 8
+    n_nuisance = 9
     n_phodims = dim_phoemb * 2
+    n_motdims = dim_conemb * 2
     n_spedims = dim_audemb * 2
     n_lexdims = dim_lexemb
 
-    feat_dims = [0, n_nuisance, n_spedims, n_phodims, n_lexdims, n_lexdims]
+    feat_dims = [0, n_nuisance, n_motdims, n_spedims, n_phodims, n_lexdims, n_lexdims]
     featdim_cs = np.cumsum(feat_dims)
-    features = ["nuisance", "spectral", "phonemes", "production", "comprehension"]
-
+    features = [
+        "nuisance",
+        "motion",
+        "spectral",
+        "phonemes",
+        "production",
+        "comprehension",
+    ]
     slices = {}
     for i, feat in enumerate(features, 1):
         slices[feat] = slice(featdim_cs[i - 1], featdim_cs[i])
@@ -242,21 +268,25 @@ def build_model(
     """Build the pipeline"""
 
     # Set up modeling pipeline
-    preprocess_pipeline = make_pipeline(
+    delayer_pipeline = make_pipeline(
         StandardScaler(with_mean=True, with_std=False),
         SplitDelayer(delays=[2, 3, 4, 5]),
+        Kernelizer(kernel="linear"),
+    )
+    motion_pipeline = make_pipeline(
+        StandardScaler(with_mean=True, with_std=False),
         Kernelizer(kernel="linear"),
     )
 
     # Make kernelizer
     kernelizers_tuples = [
-        (name, preprocess_pipeline, slice_)
+        (name, delayer_pipeline if name != "motion" else motion_pipeline, slice_)
         for name, slice_ in zip(feature_names, slices)
     ]
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
     params = dict(
-        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=200
+        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=100
     )
     mkr_model = MultipleKernelRidgeCV(kernels="precomputed", solver_params=params)
     pipeline = make_pipeline(
@@ -319,44 +349,25 @@ def main(args):
         # test production model on comprehension embeddings and time points
 
         enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
-        # Xfit = pipeline["columnkernelizer"].get_X_fit()
-        # weights = enc_model.get_primal_coef(Xfit)
 
-        # fix bad norms.. see https://github.com/numpy/numpy/issues/5697
-        # and https://stackoverflow.com/a/69788061
+        if args.save_weights:
+            Xfit = pipeline["columnkernelizer"].get_X_fit()
+            weights = enc_model.get_primal_coef(Xfit)
 
-        # fs_mask = None
-        # weights_prod = weights[-2][..., fs_mask]
-        # scale = torch.max(torch.abs(weights_prod), dim=0).values
-        # norms = torch.linalg.vector_norm(weights_prod * scale, dim=0, keepdims=True) / scale
-        # for i in torch.where(norms == 0)[1]: norms[0, i] = torch.linalg.vector_norm(weights_prod[:, i])
-        # weights_prod /= norms
-        # weights_prod *= torch.sqrt(torch.clip(scores_prod[fs_mask].cpu(), min=0))
-        # # weights_prod_delay = torch.stack(torch.split(weights_prod, 4, dim=0))
-        # weights_prod_delay = weights_prod.reshape(len(weights_prod), 4, -1)
-        # weights_prod = weights_prod_delay.mean(1)
-        # if torch.isnan(weights_prod).any() or torch.isinf(weights_prod).any():
-        #     print("nan inf prod")
-        #     breakpoint()
+            # fix bad norms.. see https://github.com/numpy/numpy/issues/5697
+            # and https://stackoverflow.com/a/69788061
 
-        # def pbad(v, backend=torch):
-        #     print(backend.isnan(v).any(), backend.isinf(v).any())
+            weights_prod = weights[-2]
+            weights_prod_delay = weights_prod.reshape(-1, 4, weights_prod.shape[-1])
+            weights_prod = weights_prod_delay.mean(1)
 
-        # weights_comp = weights[-1][..., fs_mask]
-        # norms = torch.linalg.vector_norm(weights_comp, dim=0, keepdims=True)
-        # for i in torch.where(norms == 0)[1]:
-        #     norms[0, i] = torch.linalg.vector_norm(weights_comp[:, i])
-        # # there are still 0's possibly
-        # weights_comp /= norms  # NOTE TODO can introduce inf
-        # weights_comp *= torch.sqrt(torch.clip(scores_comp[fs_mask].cpu(), min=0))
-        # weights_comp_delay = weights_comp.reshape(len(weights_comp), 4, -1)
-        # weights_comp = weights_comp_delay.mean(1)
-        # if torch.isnan(weights_comp).any() or torch.isinf(weights_comp).any():
-        #     print("nan inf comp")
-        #     breakpoint()
+            weights_comp = weights[-1]
+            weights_comp_delay = weights_comp.reshape(-1, 4, weights_comp.shape[-1])
+            weights_comp = weights_comp_delay.mean(1)
 
-        # results["cv_weights_prod"].append(weights_prod)
-        # results["cv_weights_comp"].append(weights_comp)
+            results["cv_weights_prod"].append(weights_prod)
+            results["cv_weights_comp"].append(weights_comp)
+
         results["cv_scores"].append(scores_split.numpy(force=True))
         results["cv_scores_prod"].append(scores_prod.numpy(force=True))
         results["cv_scores_comp"].append(scores_comp.numpy(force=True))
@@ -380,6 +391,7 @@ if __name__ == "__main__":
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
     parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument("--save-weights", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     args.alphas = np.logspace(0, 19, 20)

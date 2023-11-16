@@ -5,7 +5,7 @@ from typing import Optional
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from constants import CONFOUNDS, RUNS, TR
+from constants import CONFOUND_REGRESSORS, RUN_TRIAL_SLICE, RUNS, TR
 from nilearn import signal
 from scipy.stats import zscore
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -43,6 +43,29 @@ class GiftiMasker(BaseEstimator, TransformerMixin):
         signals = np.hstack(images)
 
         return signals
+
+
+def get_trials(sub: str | int, condition: str = "G") -> dict:
+    # Load timings. We need this to know which trials are generate condition
+    timingpath = Path(
+        root="stimuli",
+        conv=get_conv(sub),
+        datatype="timing",
+        run=1,
+        suffix="events",
+        ext=".csv",
+    )
+    dfs = []
+    for run in RUNS:
+        timingpath = timingpath.update(run=run)
+        dft = pd.read_csv(timingpath)
+        dfs.append(dft)
+    dft = pd.concat(dfs).reset_index(drop=True)
+    dft2 = dft[["run", "trial", "condition"]].drop_duplicates().dropna()
+    dft2 = dft2[dft2.condition == condition]
+    dft2["trial"] = dft2.trial.astype(int)
+    rt_dict = dft2[["run", "trial"]].groupby("run")["trial"].apply(list).to_dict()
+    return rt_dict
 
 
 def get_button_presses(subject: int, condition: str = "G"):
@@ -94,18 +117,52 @@ def get_button_presses(subject: int, condition: str = "G"):
     return presses, switches  # , dft
 
 
+def get_extra_run_confounds(subject: int | str, run: int) -> np.ndarray:
+    timingpath = Path(
+        root="stimuli",
+        conv=get_conv(subject),
+        datatype="timing",
+        run=run,
+        suffix="events",
+        ext=".csv",
+    )
+    dft = pd.read_csv(timingpath)
+    dft["trs"] = np.floor(dft["run.time"].values / TR).astype(int)
+
+    # prod or comp
+    in_prod = np.zeros(544, dtype=int)
+    in_comp = np.zeros(544, dtype=int)
+    for i, row in dft.iterrows():
+        if row.role == "speaker":
+            start = row.trs
+            end = dft.iloc[i + 1].trs
+            in_prod[start:end] = 1
+        elif row.role == "listener":
+            start = row.trs
+            end = dft.iloc[i + 1].trs
+            in_comp[start:end] = 1
+
+    # button press osnets
+    press_role = "listener" if subject > 100 else "speaker"
+    onsets = dft.trs[dft.role == press_role]
+    presses = np.zeros(544, dtype=int)
+    presses[onsets] = 1
+
+    conf = np.stack((in_prod, in_comp, presses)).T
+    return conf
+
+
 def get_bold(
     subject: int,
     condition: str = "G",
     space: str = "fsaverage6",
-    confounds: list[str] = CONFOUNDS,
+    confounds: list[str] = CONFOUND_REGRESSORS,
     ensure_finite: bool = True,
     return_cofounds: list[str] = [],
     use_cache: bool = False,
     save_data: bool = False,
 ) -> np.ndarray:
     """Return BOLD data for subject from all runs and trials."""
-    conv = get_conv(subject)
 
     cachepath = Path(
         root="data/derivatives/cleaned",
@@ -125,27 +182,8 @@ def get_bold(
             return bold, conf
         return bold
 
-    # Load timings. We need this to know which trials are generate condition
-    timingpath = Path(
-        root="stimuli",
-        conv=conv,
-        datatype="timing",
-        run=1,
-        suffix="events",
-        ext=".csv",
-    )
-    dfs = []
-    for run in RUNS:
-        timingpath = timingpath.update(run=run)
-        dft = pd.read_csv(timingpath)
-        dfs.append(dft)
-    dft = pd.concat(dfs).reset_index(drop=True)
-    dft2 = dft[["run", "trial", "condition"]].drop_duplicates().dropna()
-    dft2 = dft2[dft2.condition == condition]
-
-    is_surface = space.startswith("fsaverage")
-
     # load brain data
+    is_surface = space.startswith("fsaverage")
     boldpath = Path(
         root="data/derivatives/fmriprep",
         sub=f"{subject:03d}",
@@ -159,14 +197,6 @@ def get_bold(
         suffix="bold",
         ext=".func.gii" if is_surface else ".nii.gz",
     )
-
-    # Within each run, these are the indices of each trial, excluding prompt and blanks
-    trial_masks = {
-        1: slice(14, 134),
-        2: slice(148, 268),
-        3: slice(282, 402),
-        4: slice(416, 536),
-    }
 
     # Array indicating each trial within this run
     # first_trial = np.ones(8, dtype=int)
@@ -183,6 +213,8 @@ def get_bold(
     else:
         raise NotImplementedError()
 
+    rt_dict = get_trials(subject)
+
     # Get the brain data per run, also removes confounds and applies
     bold_trials = []
     conf_trials = []
@@ -197,6 +229,11 @@ def get_bold(
         conf_data = pd.read_csv(confoundpath, sep="\t", usecols=confounds)
         conf_data.dropna(axis=1, how="any", inplace=True)
         conf_data = conf_data.to_numpy()
+
+        # NOTE REMEMBER THIS FOR ENCODING AND THE CACHE
+        extra_confs = get_extra_run_confounds(subject, run)
+        conf_data = np.hstack((conf_data, extra_confs))
+
         conf_ret = pd.read_csv(
             confoundpath,
             sep="\t",
@@ -216,9 +253,9 @@ def get_bold(
             )
 
         # Mask for the two trials for this run that are generate condition
-        use_trials = dft2[dft2.run == run].trial.to_numpy(dtype=int)
+        use_trials = rt_dict[run]
         for trial in use_trials:
-            trial_slice = trial_masks[trial]
+            trial_slice = RUN_TRIAL_SLICE[trial]
             bold_trials.append(zscore(bold[trial_slice], axis=0))
             conf_trials.append(conf_ret[trial_slice])
 

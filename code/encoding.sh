@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#SBATCH --time=05:00:00          # total run time limit (HH:MM:SS)
-#SBATCH --mem=6G                 # memory per cpu-core (4G is default)
+#SBATCH --time=03:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --mem=16G                 # memory per cpu-core (4G is default)
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
 #SBATCH --cpus-per-task=1        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -36,7 +36,7 @@ fi
 
 for sub in "${subjects[@]}"; do
     echo $sub
-    python code/encoding.py -s "$sub" -j 1 -m model-gpt2-xl_layer-0.75
+    python code/encoding.py -s "$sub" -j 1 -m model-gpt2-medium_layer-0.75 --save-weights
 done
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

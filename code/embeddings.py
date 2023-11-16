@@ -257,13 +257,11 @@ def add_causal_lm_embs(
 
     # Do a static lookup
     if maxlen == 0:
-        print("Static embeddings!")
         t2e = model.lm_head.weight
         ids = torch.tensor(df.token_id.values, dtype=torch.long)
         with torch.no_grad():
             embeddings = t2e[ids].numpy(force=True)
         df["embedding"] = [e for e in np.vstack(embeddings)]
-        df.drop("utterance", axis=1, inplace=True)
         return df
 
     examples = []
@@ -426,7 +424,7 @@ def main(args):
         df = add_embeddings(df, **vars(args))
 
         epath = Path.frompath(tpath)
-        epath.update(root="embeddings", datatype=dirname, suffix=None, ext="pkl")
+        epath.update(root="features", datatype=dirname, suffix=None, ext="pkl")
         epath.mkdirs()
         df.to_pickle(epath)
 

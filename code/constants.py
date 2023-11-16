@@ -12,6 +12,14 @@ RUN_TRS = 544
 TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
 CONV_TRS = 120
 
+# Within each run, these are the indices of each trial, excluding prompt and blanks
+RUN_TRIAL_SLICE = {
+    1: slice(14, 134),
+    2: slice(148, 268),
+    3: slice(282, 402),
+    4: slice(416, 536),
+}
+
 # filename keys, useful for ArgumentParser args object when updating Paths
 FNKEYS = ("conv", "run", "trial")
 
@@ -94,7 +102,7 @@ SUBS_STRANGERS = list(CONVS_STRANGERS) + [c - 100 for c in CONVS_STRANGERS]
 SUBS_FRIENDS = list(CONVS_FRIENDS) + [c - 100 for c in CONVS_FRIENDS]
 SUBS = SUBS_FRIENDS + SUBS_STRANGERS
 
-CONFOUNDS = [
+CONFOUND_REGRESSORS = [
     "a_comp_cor_00",
     "a_comp_cor_01",
     "a_comp_cor_02",
@@ -111,6 +119,9 @@ CONFOUNDS = [
     "cosine08",
     "cosine09",
     "cosine10",
+]
+
+MOTION_CONFOUNDS = [
     "trans_x",
     "trans_x_derivative1",
     "trans_x_derivative1_power2",
@@ -135,7 +146,6 @@ CONFOUNDS = [
     "rot_z_derivative1",
     "rot_z_power2",
     "rot_z_derivative1_power2",
-    "framewise_displacement"
 ]
 
 ARPABET_PHONES = [

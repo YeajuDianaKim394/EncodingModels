@@ -13,6 +13,10 @@ class Atlas:
         self.id2label = labels
         self.label2id = {v: k for k, v in labels.items()}
 
+    @property
+    def labels(self) -> list[str]:
+        return list(self.label2id.keys())[1:]
+
     def label(self, key: int) -> str:
         return self.id2label.get(key)
 
@@ -36,23 +40,24 @@ class Atlas:
         n_parcels = len(self)
         parcellation = self.label_img
 
-        if values.ndim == 1:
-            values = values[np.newaxis, :]
+        # if values.ndim == 1:
+        #     values = values[np.newaxis, :]
 
         new_shape = list(values.shape)
         new_shape[axis] = n_parcels
         parcel_values = np.zeros(new_shape, dtype=values.dtype)
         for i in range(1, n_parcels + 1):
             parcel_mask = parcellation == i
-            parcel_values[:, i - 1] = agg_func(values[:, parcel_mask], axis=axis)
+            parcel_voxels = values[..., parcel_mask]
+            parcel_values[..., i - 1] = agg_func(parcel_voxels, axis=-1)
         return parcel_values
 
     def parc_to_vox(self, values: np.ndarray) -> np.ndarray:
         parcellation = self.label_img
         voxel_values = np.zeros_like(self.label_img, dtype=values.dtype)
-        for i in range(1, len(self)):
+        for i in range(1, len(self) + 1):
             parcel_mask = parcellation == i
-            voxel_values[parcel_mask] = values[0, i]  # NOTE
+            voxel_values[parcel_mask] = values[..., i]
 
         return voxel_values
 
@@ -61,6 +66,15 @@ class Atlas:
 
     def get_background_mask(self) -> np.ndarray:
         return self.label_img == 0
+
+    def roimask(self, rois: list[str | int]) -> np.ndarray:
+        if len(rois) == 1:
+            roi_id = rois[0]
+            roi_id = self[roi_id] if isinstance(roi_id, str) else roi_id
+            return self.label_img == roi_id
+        else:
+            roi_ids = np.array([self[r] if isinstance(r, str) else r for r in rois])
+            return np.in1d(self.label_img, roi_ids)
 
     @staticmethod
     def schaefer2018(rois: int = 1000, networks: int = 17):
@@ -75,12 +89,111 @@ class Atlas:
         return Atlas(atlasname, label_img, labels)
 
     @staticmethod
-    def glasser2016():
-        atlasname = "glasser2016"
-        gLh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-L_desc-MMP_dseg.label.gii")
-        gRh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-R_desc-MMP_dseg.label.gii")
+    def schaefer(
+        parcels: int = 1000,
+        networks: int = 17,
+        kong: bool = False,
+        space: str = "fsaverage6",
+    ):
+        from os import path
+
+        import requests
+
+        url = (
+            "https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/"
+            f"Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/{space}/label/"
+        )
+
+        kong = "Kong2022_" if kong else ""
+        filename = f"Schaefer2018_{parcels}Parcels_{kong}{networks}Networks_order.annot"
+        filenames = ["lh." + filename, "rh." + filename]
+        local_files = []
+        for filename in filenames:
+            local_fn = path.join(DATADIR, filename)
+            local_files.append(local_fn)
+            if not path.isfile(local_fn):
+                response = requests.get(url + filename)
+                if not response.ok:
+                    raise RuntimeError("Unable to retrieve file " + url + filename)
+                with open(local_fn, "wb") as f:
+                    f.write(response.content)
+
+        atlasname = f"{parcels}Parcels{kong}{networks}Networks"
+        gLh, gRh = annot_to_gifti(tuple(local_files))
         label_img = np.concatenate((gLh.agg_data(), gRh.agg_data()))
         labels = (
             gLh.labeltable.get_labels_as_dict() | gRh.labeltable.get_labels_as_dict()
         )
+
         return Atlas(atlasname, label_img, labels)
+
+    def to_network(self, symmetric: bool = False):
+        network_img = np.zeros_like(self.label_img)
+        start = 2 if symmetric else 1
+
+        networks = np.unique(
+            ["_".join(l.split("_")[start:3]) for l in self.labels]
+        ).tolist()
+        network2id = {v: k for k, v in enumerate(networks, 1)}
+        network2id["_".join(self.label(0).split("_")[start:3])] = 0
+
+        id2network = {}
+        id2network[0] = self[0]
+        id2network |= {k: v for k, v in enumerate(networks, 1)}
+
+        for label, parc_id in self.label2id.items():
+            parc_net = "_".join(label.split("_")[start:3])
+            net_id = network2id[parc_net]
+            network_img[self.label_img == parc_id] = net_id
+
+        return Atlas(self.name, network_img, id2network)
+
+    @staticmethod
+    def glasser2016(symmetric: bool = False):
+        atlasname = "glasser2016"
+
+        # load data
+        gLh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-L_desc-MMP_dseg.label.gii")
+        gRh = nib.load(f"{DATADIR}/tpl-fsaverage6_hemi-R_desc-MMP_dseg.label.gii")
+        left_data = gLh.agg_data()
+        right_data = gRh.agg_data()
+
+        labels = gLh.labeltable.get_labels_as_dict()
+
+        if not symmetric:
+            right_data[right_data > 0] += 180
+            right_labels = gRh.labeltable.get_labels_as_dict()
+            right_labels = {i + 180: v for i, v in right_labels.items() if i != 0}
+            labels |= right_labels
+
+        label_img = np.concatenate((left_data, right_data))
+
+        return Atlas(atlasname, label_img, labels)
+
+    @staticmethod
+    def ev2010():
+        from neuromaps.transforms import mni152_to_fsaverage
+
+        gifL, gifR = mni152_to_fsaverage(
+            "mats/allParcels_language_SN220.nii", method="nearest"
+        )
+        lang_atlas = np.concatenate((gifL.agg_data(), gifR.agg_data()))
+
+        labels = [
+            "???",
+            "LH_IFGorb",
+            "LH_IFG",
+            "LH_MFG",
+            "LH_AntTemp",
+            "LH_PostTemp",
+            "LH_AngG",
+            "RH_IFGorb",
+            "RH_IFG",
+            "RH_MFG",
+            "RH_AntTemp",
+            "RH_PostTemp",
+            "RH_AngG",
+        ]
+        id2label = {i: label for i, label in enumerate(labels)}
+
+        return Atlas("langnet", lang_atlas, id2label)
