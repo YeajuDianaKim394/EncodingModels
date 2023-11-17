@@ -21,6 +21,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from util.atlas import Atlas
 from util.path import Path
 from util.subject import get_bold, get_button_presses, get_transcript
 
@@ -85,9 +86,7 @@ def build_regressors(subject: int, modelname: str):
     dim_lexemb = 0
     dim_phoemb = 0
     dim_audemb = 80
-    dim_conemb = 24
     audio_emb = []
-    conf_emb = []
 
     # For each trial, create a feature for each TR
     for (run, trial), subdf in dfemb.groupby(["run", "trial"]):
@@ -114,11 +113,6 @@ def build_regressors(subject: int, modelname: str):
         audpath.update(conv=conv, run=run, trial=trial)
         filename = glob(audpath.starstr(["conv", "datatype"]))[0]
         audio_emb.append(np.load(filename))
-
-        confpath = Path(root="features", datatype="motion", ext=".npy")
-        modtrial = ((trial - 1) % 4) + 1
-        confpath.update(sub=f"{subject:03d}", run=run, trial=modtrial)
-        conf_emb.append(np.load(confpath))
 
         # Go through one TR at a time and find words that fall within this TR
         # average their embeddings, get num of words, etc
@@ -195,21 +189,12 @@ def build_regressors(subject: int, modelname: str):
     prod_audemb[pmask] = audio_emb[pmask]
     comp_audemb[~pmask] = audio_emb[~pmask]
 
-    # split motion embeddings
-    conf_emb = np.vstack(conf_emb)
-    prod_confemb = np.zeros_like(conf_emb)
-    comp_confemb = np.zeros_like(conf_emb)
-    prod_confemb[pmask] = conf_emb[pmask]
-    comp_confemb[~pmask] = conf_emb[~pmask]
-
     X = np.hstack(
         (
             presses.reshape(-1, 1),
             switches.reshape(-1, 1),
             (1 - switches).reshape(-1, 1),
             X[:, :6],
-            prod_confemb,
-            comp_confemb,
             prod_audemb,
             comp_audemb,
             X[:, 6:],
@@ -218,17 +203,15 @@ def build_regressors(subject: int, modelname: str):
 
     n_nuisance = 9
     n_phodims = dim_phoemb * 2
-    n_motdims = dim_conemb * 2
     n_spedims = dim_audemb * 2
     n_lexdims = dim_lexemb
 
-    feat_dims = [0, n_nuisance, n_motdims, n_spedims, n_phodims, n_lexdims, n_lexdims]
+    feat_dims = [0, n_nuisance, n_spedims, n_phodims, n_lexdims, n_lexdims]
     featdim_cs = np.cumsum(feat_dims)
     features = [
-        "nuisance",
-        "motion",
+        "task",
         "spectral",
-        "phonemes",
+        "articulation",
         "production",
         "comprehension",
     ]
@@ -243,6 +226,7 @@ def compress_regressors(X: np.ndarray, features: dict) -> (np.ndarray, dict):
     """Compress regressors across production and comprehension,
 
     removing this distinction."""
+    raise NotImplementedError
     x_nuis = X[:, [0, 1, 2]]
     x_in = X[:, 2:4].sum(axis=1, keepdims=True)
     x_wr = X[:, 4:6].sum(axis=1, keepdims=True)
@@ -273,15 +257,10 @@ def build_model(
         SplitDelayer(delays=[2, 3, 4, 5]),
         Kernelizer(kernel="linear"),
     )
-    motion_pipeline = make_pipeline(
-        StandardScaler(with_mean=True, with_std=False),
-        Kernelizer(kernel="linear"),
-    )
 
     # Make kernelizer
     kernelizers_tuples = [
-        (name, delayer_pipeline if name != "motion" else motion_pipeline, slice_)
-        for name, slice_ in zip(feature_names, slices)
+        (name, delayer_pipeline, slice_) for name, slice_ in zip(feature_names, slices)
     ]
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
@@ -311,9 +290,13 @@ def main(args):
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
 
     print(datetime.now(), "Get BOLD")
-    Y_bold = get_bold(sub, space="fsaverage6")
+    Y_bold = get_bold(sub, atlas=args.atlas, use_cache=args.use_cache)
 
-    delayer = SplitDelayer(delays=[2, 3, 4, 5])
+    if args.atlas is not None:
+        # atlasname = args.atlas
+        atlas = Atlas.schaefer(1000)
+        Y_bold = atlas.vox_to_parc(Y_bold)
+        print(Y_bold.shape)
 
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
@@ -339,8 +322,8 @@ def main(args):
         scores_split = correlation_score_split(Y_test, Y_preds)
 
         # Compute correlation based on masked prod/comp
-        prod_mask = delayer.fit_transform(X_test[:, 1:2]).any(-1)
-        comp_mask = delayer.fit_transform(X_test[:, 2:3]).any(-1)
+        prod_mask = X_test[:, 1].astype(bool)
+        comp_mask = X_test[:, 2].astype(bool)
         scores_prod = correlation_score(Y_test[prod_mask], Y_preds[-2, prod_mask])
         scores_comp = correlation_score(Y_test[comp_mask], Y_preds[-1, comp_mask])
 
@@ -353,9 +336,6 @@ def main(args):
         if args.save_weights:
             Xfit = pipeline["columnkernelizer"].get_X_fit()
             weights = enc_model.get_primal_coef(Xfit)
-
-            # fix bad norms.. see https://github.com/numpy/numpy/issues/5697
-            # and https://stackoverflow.com/a/69788061
 
             weights_prod = weights[-2]
             weights_prod_delay = weights_prod.reshape(-1, 4, weights_prod.shape[-1])
@@ -391,6 +371,8 @@ if __name__ == "__main__":
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
     parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument("--atlas", type=str, default=None)
+    parser.add_argument("--use-cache", action="store_true")
     parser.add_argument("--save-weights", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
@@ -406,10 +388,14 @@ if __name__ == "__main__":
     result = main(args)
 
     print(datetime.now(), "Saving")
+    desc = ""
+    if args.atlas is not None:
+        desc += args.atlas
     pklpath = Path(
         root=f"encoding{args.suffix}",
         sub=f"{args.subject:03d}",
         datatype=args.model,
+        desc=desc,
         ext=".hdf5",
     )
     pklpath.mkdirs()
