@@ -15,7 +15,7 @@ import torch
 from constants import CONV_TRS, RUNS, TR
 from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
-from himalaya.scoring import correlation_score, correlation_score_split
+from himalaya.scoring import correlation_score_split
 from scipy.ndimage import binary_dilation
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import PredefinedSplit
@@ -24,17 +24,6 @@ from sklearn.preprocessing import StandardScaler
 from util.atlas import Atlas
 from util.path import Path
 from util.subject import get_bold, get_button_presses, get_transcript
-
-
-class Caster(BaseEstimator, TransformerMixin):
-    def __init__(self, dtype=None):
-        self.dtype = dtype
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        return torch.Tensor(X)
 
 
 class SplitDelayer(BaseEstimator, TransformerMixin):
@@ -82,11 +71,9 @@ def build_regressors(subject: int, modelname: str):
     dfphone = get_transcript(conv=conv, modelname="articulatory")
 
     # Build regressors per TR
-    X = []
-    dim_lexemb = 0
-    dim_phoemb = 0
-    dim_audemb = 80
     audio_emb = []
+    conf_emb = []
+    regressors = defaultdict(list)
 
     # For each trial, create a feature for each TR
     for (run, trial), subdf in dfemb.groupby(["run", "trial"]):
@@ -113,6 +100,11 @@ def build_regressors(subject: int, modelname: str):
         audpath.update(conv=conv, run=run, trial=trial)
         filename = glob(audpath.starstr(["conv", "datatype"]))[0]
         audio_emb.append(np.load(filename))
+
+        confpath = Path(root="features", datatype="motion", ext=".npy")
+        modtrial = ((trial - 1) % 4) + 1
+        confpath.update(sub=f"{subject:03d}", run=run, trial=modtrial)
+        conf_emb.append(np.load(confpath))
 
         # Go through one TR at a time and find words that fall within this TR
         # average their embeddings, get num of words, etc
@@ -158,67 +150,103 @@ def build_regressors(subject: int, modelname: str):
                     axis=0, keepdims=True
                 )
 
-        x_trial = np.hstack(
-            (
-                in_prod,
-                in_comp,
-                prod_wr,
-                comp_wr,
-                prod_pr,
-                comp_pr,
-                prod_phoemb,
-                comp_phoemb,
-                prod_lexemb,
-                comp_lexemb,
-            )
-        )
-        X.append(x_trial)
+        regressors["prod_onset"].append(in_prod)
+        regressors["prod_word_rate"].append(prod_wr)
+        regressors["prod_phoneme_rate"].append(prod_pr)
+        regressors["prod_phoneme_emb"].append(prod_phoemb)
+        regressors["prod_lexical_emb"].append(prod_lexemb)
 
-    X = np.vstack(X)
+        regressors["comp_onset"].append(in_comp)
+        regressors["comp_word_rate"].append(comp_wr)
+        regressors["comp_phoneme_rate"].append(comp_pr)
+        regressors["comp_phoneme_emb"].append(comp_phoemb)
+        regressors["comp_lexical_emb"].append(comp_lexemb)
 
     # get additional nuisance variables
     presses, switches = get_button_presses(subject)
     presses = binary_dilation(presses)
-
-    pmask = switches.astype(bool)
+    regressors["prod_button_press"] = presses.reshape(-1, 1)
+    regressors["prod_screen"] = switches.reshape(-1, 1)
+    regressors["comp_screen"] = 1 - switches.reshape(-1, 1)
 
     # split spectral embeddings
+    pmask = switches.flatten().astype(bool)
     audio_emb = np.vstack(audio_emb)
     prod_audemb = np.zeros_like(audio_emb)
     comp_audemb = np.zeros_like(audio_emb)
     prod_audemb[pmask] = audio_emb[pmask]
     comp_audemb[~pmask] = audio_emb[~pmask]
+    regressors["prod_spectral_emb"] = prod_audemb
+    regressors["comp_spectral_emb"] = comp_audemb
 
-    X = np.hstack(
-        (
-            presses.reshape(-1, 1),
-            switches.reshape(-1, 1),
-            (1 - switches).reshape(-1, 1),
-            X[:, :6],
-            prod_audemb,
-            comp_audemb,
-            X[:, 6:],
-        )
-    )
+    # split motion embeddings
+    conf_emb = np.vstack(conf_emb)
+    prod_confemb = np.zeros_like(conf_emb)
+    comp_confemb = np.zeros_like(conf_emb)
+    prod_confemb[pmask] = conf_emb[pmask]
+    comp_confemb[~pmask] = conf_emb[~pmask]
+    regressors["prod_motion_emb"] = prod_confemb
+    regressors["comp_motion_emb"] = comp_confemb
 
-    n_nuisance = 9
-    n_phodims = dim_phoemb * 2
-    n_spedims = dim_audemb * 2
-    n_lexdims = dim_lexemb
+    # spaces = {
+    #     "prod_task": [
+    #         "prod_button_press",
+    #         "prod_screen",
+    #         "prod_onset",
+    #         "prod_word_rate",
+    #         "prod_phoneme_rate",
+    #     ],
+    #     "prod_spectral": ["prod_spectral_emb"],
+    #     "prod_articulation": ["prod_phoneme_emb"],
+    #     "comp_task": [
+    #         "comp_screen",
+    #         "comp_onset",
+    #         "comp_word_rate",
+    #         "comp_phoneme_rate",
+    #     ],
+    #     "comp_spectral": ["comp_spectral_emb"],
+    #     "comp_articulation": ["comp_phoneme_emb"],
+    #     "prod_semantic": ["prod_lexical_emb"],
+    #     "comp_semantic": ["comp_lexical_emb"],
+    # }
 
-    feat_dims = [0, n_nuisance, n_spedims, n_phodims, n_lexdims, n_lexdims]
-    featdim_cs = np.cumsum(feat_dims)
-    features = [
-        "task",
-        "spectral",
-        "articulation",
-        "production",
-        "comprehension",
-    ]
+    spaces = {
+        "task": [
+            "prod_button_press",
+            "prod_screen",
+            "prod_onset",
+            "prod_word_rate",
+            "prod_phoneme_rate",
+            "comp_screen",
+            "comp_onset",
+            "comp_word_rate",
+            "comp_phoneme_rate",
+        ],
+        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
+        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
+        "motion": ["prod_motion_emb", "comp_motion_emb"],
+        "prod_semantic": ["prod_lexical_emb"],
+        "comp_semantic": ["comp_lexical_emb"],
+    }
+
+    X = []
+    start = 0
     slices = {}
-    for i, feat in enumerate(features, 1):
-        slices[feat] = slice(featdim_cs[i - 1], featdim_cs[i])
+    for feature_space, items in spaces.items():
+        x_features = []
+        for item in items:
+            values = regressors[item]
+            if isinstance(values, list) and len(values) > 1:
+                values = np.concatenate(values)
+            else:
+                values = np.asarray(values)
+            x_features.append(values)
+        x_features = np.hstack(x_features)
+        X.append(x_features)
+        slices[feature_space] = slice(start, start + x_features.shape[1])
+        start += x_features.shape[1]
 
+    X = np.hstack(X)
     return X, slices
 
 
@@ -252,15 +280,25 @@ def build_model(
     """Build the pipeline"""
 
     # Set up modeling pipeline
-    delayer_pipeline = make_pipeline(
+    default_pipeline = make_pipeline(
         StandardScaler(with_mean=True, with_std=False),
         SplitDelayer(delays=[2, 3, 4, 5]),
         Kernelizer(kernel="linear"),
     )
+    task_pipeline = make_pipeline(
+        SplitDelayer(delays=[2, 3, 4, 5]),
+        Kernelizer(kernel="linear"),
+    )
+    motion_pipeline = make_pipeline(
+        StandardScaler(with_mean=True, with_std=False),
+        Kernelizer(kernel="linear"),
+    )
+    space2pipe = {"task": task_pipeline, "motion": motion_pipeline}
 
     # Make kernelizer
     kernelizers_tuples = [
-        (name, delayer_pipeline, slice_) for name, slice_ in zip(feature_names, slices)
+        (name, space2pipe.get(name, default_pipeline), slice_)
+        for name, slice_ in zip(feature_names, slices)
     ]
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
@@ -270,7 +308,6 @@ def build_model(
     mkr_model = MultipleKernelRidgeCV(kernels="precomputed", solver_params=params)
     pipeline = make_pipeline(
         column_kernelizer,
-        Caster(),
         mkr_model,
     )
 
@@ -287,14 +324,17 @@ def main(args):
     feature_names = list(features.keys())
     slices = list(features.values())
 
+    delayer = SplitDelayer(delays=[2, 3, 4, 5])
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
 
     print(datetime.now(), "Get BOLD")
-    Y_bold = get_bold(sub, atlas=args.atlas, use_cache=args.use_cache)
+    Y_bold = get_bold(
+        sub, atlas=args.atlas, use_cache=args.use_cache, cache_desc=args.cache_desc
+    )
 
     if args.atlas is not None:
         # atlasname = args.atlas
-        atlas = Atlas.schaefer(1000)
+        atlas = Atlas.schaefer(parcels=1000, kong=True)
         Y_bold = atlas.vox_to_parc(Y_bold)
         print(Y_bold.shape)
 
@@ -304,35 +344,29 @@ def main(args):
     for k, (train_index, test_index) in enumerate(kfold.split()):
         X_train, X_test = X[train_index], X[test_index]
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
-        print(
-            datetime.now(),
-            "Fold",
-            k + 1,
-            X_train.shape,
-            Y_train.shape,
-            X.dtype,
-            Y_bold.dtype,
-        )
+        print(datetime.now(), f"F{k+1}", X_train.shape, Y_train.shape)
 
         pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
-
         pipeline.fit(X_train, Y_train)
 
         Y_preds = pipeline.predict(X_test, split=True)
         scores_split = correlation_score_split(Y_test, Y_preds)
 
         # Compute correlation based on masked prod/comp
+        # NOTE 1 and 5 indexing may change below depending on features
         prod_mask = X_test[:, 1].astype(bool)
-        comp_mask = X_test[:, 2].astype(bool)
-        scores_prod = correlation_score(Y_test[prod_mask], Y_preds[-2, prod_mask])
-        scores_comp = correlation_score(Y_test[comp_mask], Y_preds[-1, comp_mask])
+        # comp_mask = X_test[:, 5].astype(bool)
+        prod_mask = delayer.fit_transform(prod_mask).any(-1)
+        comp_mask = np.logical_not(prod_mask)
 
-        # test generalization from left to right hemisphere
-
-        # test production model on comprehension embeddings and time points
+        scores_prod = correlation_score_split(
+            Y_test[prod_mask], Y_preds[:, prod_mask, :]
+        )
+        scores_comp = correlation_score_split(
+            Y_test[comp_mask], Y_preds[:, comp_mask, :]
+        )
 
         enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
-
         if args.save_weights:
             Xfit = pipeline["columnkernelizer"].get_X_fit()
             weights = enc_model.get_primal_coef(Xfit)
@@ -356,9 +390,6 @@ def main(args):
 
     # stack across folds
     result = {k: np.stack(v) for k, v in results.items()}
-    result["in_prod"] = X[:, 1].astype(bool)
-    result["in_comp"] = X[:, 2].astype(bool)
-
     return result
 
 
@@ -373,6 +404,7 @@ if __name__ == "__main__":
     parser.add_argument("--suffix", type=str, default="")
     parser.add_argument("--atlas", type=str, default=None)
     parser.add_argument("--use-cache", action="store_true")
+    parser.add_argument("--cache-desc", type=str, default=None)
     parser.add_argument("--save-weights", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
@@ -388,9 +420,9 @@ if __name__ == "__main__":
     result = main(args)
 
     print(datetime.now(), "Saving")
-    desc = ""
+    desc = None
     if args.atlas is not None:
-        desc += args.atlas
+        desc = args.atlas
     pklpath = Path(
         root=f"encoding{args.suffix}",
         sub=f"{args.subject:03d}",

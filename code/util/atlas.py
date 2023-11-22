@@ -40,9 +40,6 @@ class Atlas:
         n_parcels = len(self)
         parcellation = self.label_img
 
-        # if values.ndim == 1:
-        #     values = values[np.newaxis, :]
-
         new_shape = list(values.shape)
         new_shape[axis] = n_parcels
         parcel_values = np.zeros(new_shape, dtype=values.dtype)
@@ -54,10 +51,12 @@ class Atlas:
 
     def parc_to_vox(self, values: np.ndarray) -> np.ndarray:
         parcellation = self.label_img
-        voxel_values = np.zeros_like(self.label_img, dtype=values.dtype)
+        new_shape = list(values.shape)
+        new_shape[-1] = parcellation.size
+        voxel_values = np.zeros(new_shape, dtype=values.dtype)
         for i in range(1, len(self) + 1):
             parcel_mask = parcellation == i
-            voxel_values[parcel_mask] = values[..., i]
+            voxel_values[..., parcel_mask] = values[..., i - 1 : i]
 
         return voxel_values
 
@@ -167,6 +166,8 @@ class Atlas:
             labels |= right_labels
 
         label_img = np.concatenate((left_data, right_data))
+
+        labels = {k: v.removesuffix("_ROI") for k, v in labels.items()}
 
         return Atlas(atlasname, label_img, labels)
 

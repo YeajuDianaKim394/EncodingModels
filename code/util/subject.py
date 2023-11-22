@@ -5,10 +5,11 @@ from typing import Optional
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from constants import CONFOUND_REGRESSORS, RUN_TRIAL_SLICE, RUNS, TR
+from constants import CONFOUND_REGRESSORS, MOTION_CONFOUNDS, RUN_TRIAL_SLICE, RUNS, TR
 from nilearn import signal
 from scipy.stats import zscore
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.linear_model import LinearRegression
 
 from .path import Path
 
@@ -156,10 +157,13 @@ def get_bold(
     subject: int,
     condition: str = "G",
     space: str = "fsaverage6",
-    confounds: list[str] = CONFOUND_REGRESSORS,
+    atlas: str = None,
+    run_confounds: list[str] = CONFOUND_REGRESSORS,
+    trial_confounds: list[str] = MOTION_CONFOUNDS,
     ensure_finite: bool = True,
-    return_cofounds: list[str] = [],
+    return_confounds: list[str] = [],
     use_cache: bool = False,
+    cache_desc: str = None,
     save_data: bool = False,
 ) -> np.ndarray:
     """Return BOLD data for subject from all runs and trials."""
@@ -170,13 +174,14 @@ def get_bold(
         datatype="func",
         task="Conv",
         space=space,
+        desc=cache_desc,
         suffix="bold",
         ext=".npy",
     )
     cachepath.mkdirs()
-    if use_cache and cachepath.isfile():
+    if use_cache:
         bold = np.load(cachepath)
-        if return_cofounds:
+        if return_confounds:
             cachepath.update(suffix="confounds")
             conf = np.load(cachepath)
             return bold, conf
@@ -198,10 +203,6 @@ def get_bold(
         ext=".func.gii" if is_surface else ".nii.gz",
     )
 
-    # Array indicating each trial within this run
-    # first_trial = np.ones(8, dtype=int)
-    # trials = np.concatenate((first_trial, np.repeat([1, 2, 3, 4], TRIAL_TRS)))
-
     # Set up masker
     if space.startswith("fsaverage"):
         masker = GiftiMasker(
@@ -214,31 +215,40 @@ def get_bold(
         raise NotImplementedError()
 
     rt_dict = get_trials(subject)
+    reg_model = LinearRegression()
+    _, switches = get_button_presses(subject)
+    prod_mask = switches.astype(bool)
 
     # Get the brain data per run, also removes confounds and applies
     bold_trials = []
     conf_trials = []
     for run in RUNS:
         boldpath = boldpath.update(run=run)
-
         confoundpath = boldpath.copy()
         del confoundpath["space"]
         if is_surface:
             del confoundpath["hemi"]
         confoundpath.update(desc="confounds", suffix="timeseries", ext=".tsv")
-        conf_data = pd.read_csv(confoundpath, sep="\t", usecols=confounds)
-        conf_data.dropna(axis=1, how="any", inplace=True)
-        conf_data = conf_data.to_numpy()
 
-        # NOTE REMEMBER THIS FOR ENCODING AND THE CACHE
-        extra_confs = get_extra_run_confounds(subject, run)
-        conf_data = np.hstack((conf_data, extra_confs))
+        conf_data = None
+        if run_confounds is not None and len(run_confounds):
+            conf_data = pd.read_csv(confoundpath, sep="\t", usecols=run_confounds)
+            conf_data.fillna(value=0, inplace=True)
+            conf_data = conf_data.to_numpy()
 
-        conf_ret = pd.read_csv(
-            confoundpath,
-            sep="\t",
-            usecols=return_cofounds,
-        ).to_numpy()
+        conf_motion = None
+        if trial_confounds is not None and len(trial_confounds):
+            conf_motion = pd.read_csv(confoundpath, sep="\t", usecols=trial_confounds)
+            conf_motion.fillna(value=0, inplace=True)
+            conf_motion = conf_motion.to_numpy()
+
+        conf_ret = None
+        if return_confounds is not None and len(return_confounds):
+            conf_ret = pd.read_csv(
+                confoundpath,
+                sep="\t",
+                usecols=return_confounds,
+            ).to_numpy()
 
         boldpaths = boldpath
         if is_surface:
@@ -249,26 +259,47 @@ def get_bold(
             warnings.simplefilter(action="ignore", category=FutureWarning)
             bold = masker.fit_transform(
                 boldpaths,  # type: ignore
-                confounds=conf_data if len(confounds) else None,
+                confounds=conf_data,
             )
 
         # Mask for the two trials for this run that are generate condition
         use_trials = rt_dict[run]
-        for trial in use_trials:
+        for j, trial in enumerate(use_trials):
+            # get bold data
             trial_slice = RUN_TRIAL_SLICE[trial]
-            bold_trials.append(zscore(bold[trial_slice], axis=0))
-            conf_trials.append(conf_ret[trial_slice])
+            bold_trial = bold[trial_slice]
+
+            if conf_motion is not None:
+                # select the relevant part from the mask
+                start = (run - 1) * 240 + (j * 120)
+                trial_pmask = prod_mask[start : start + 120]
+
+                # split motion confounds into prod/comp
+                conf_trial = zscore(conf_motion[trial_slice], axis=0)
+                conf_trial = np.nan_to_num(conf_trial, copy=False)
+                n_motconfs = conf_motion.shape[1]
+                conf_trial2 = np.zeros((120, n_motconfs * 2 + 2))
+                conf_trial2[trial_pmask, :n_motconfs] = conf_trial[trial_pmask]
+                conf_trial2[~trial_pmask, n_motconfs:-2] = conf_trial[~trial_pmask]
+                conf_trial2[:, -2] = trial_pmask.astype(conf_trial2.dtype)
+                conf_trial2[:, -1] = (~trial_pmask).astype(conf_trial2.dtype)
+
+                # get residual
+                reg_model = reg_model.fit(conf_trial2, bold_trial)
+                bold_trial -= reg_model.predict(conf_trial2)
+
+            bold_trials.append(zscore(bold_trial, axis=0))
+            if conf_ret is not None:
+                conf_trials.append(conf_ret[trial_slice])
 
     all_bold = None
     all_bold = np.vstack(bold_trials)
     if ensure_finite:
-        mask = np.logical_not(np.isfinite(all_bold))
-        if mask.any():
-            all_bold[mask] = 0
+        all_bold = np.nan_to_num(all_bold, copy=False)
     if save_data:
         np.save(cachepath, all_bold)
 
-    if len(return_cofounds):
+    if len(return_confounds):
         confs = np.vstack(conf_trials)
         if save_data:
             cachepath.update(suffix="confounds")

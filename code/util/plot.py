@@ -1,28 +1,46 @@
 """Utilities to make the plotting life easier
 """
+import nibabel as nib
 import numpy as np
+from brainspace.mesh.mesh_io import read_surface
 from neuromaps.datasets import fetch_fsaverage, fetch_fslr
-from neuromaps.transforms import fsaverage_to_fslr
+from neuromaps.transforms import fsaverage_to_fslr, mni152_to_fsaverage
 from nibabel.gifti.gifti import GiftiDataArray, GiftiImage
 from surfplot import Plot
 from surfplot.utils import threshold as surf_threshold
 
 from .atlas import Atlas
 
+_image_cache = {}
+
 
 def get_surfplot(
     surface: str = "fsaverage",
     density: str = "41k",
     brightness: float = 0.7,
-    sulc_alpha: float = 1.0,
+    sulc_alpha: float = 0.5,
     **kwargs,
 ) -> Plot:
     """Get a basic Plot to add layers to."""
 
     fetch_func = fetch_fsaverage if surface == "fsaverage" else fetch_fslr
     surfaces = fetch_func(data_dir="mats", density=density)
-    surf_lh, surf_rh = surfaces["inflated"]
-    sulc_lh, sulc_rh = surfaces["sulc"]
+    surf_lh_fn, surf_rh_fn = surfaces["inflated"]
+    sulc_lh_fn, sulc_rh_fn = surfaces["sulc"]
+
+    if surf_lh_fn not in _image_cache:
+        _image_cache[surf_lh_fn] = read_surface(str(surf_lh_fn))
+    if surf_rh_fn not in _image_cache:
+        _image_cache[surf_rh_fn] = read_surface(str(surf_rh_fn))
+    if sulc_lh_fn not in _image_cache:
+        _image_cache[sulc_lh_fn] = nib.load(str(sulc_lh_fn))
+    if sulc_rh_fn not in _image_cache:
+        _image_cache[sulc_rh_fn] = nib.load(str(sulc_rh_fn))
+
+    surf_lh = _image_cache[surf_lh_fn]
+    surf_rh = _image_cache[surf_rh_fn]
+    sulc_lh = _image_cache[sulc_lh_fn]
+    sulc_rh = _image_cache[sulc_rh_fn]
 
     p = Plot(surf_lh=surf_lh, surf_rh=surf_rh, brightness=brightness, **kwargs)
     p.add_layer(
@@ -115,3 +133,47 @@ def surface_plot(
             ax.set_title(title + f" ({vmin:.3f}, {vmax:.3f})")
 
     return fig
+
+
+def get_surf_grad(
+    axis: str = "transverse",
+    vmin: float = 0.0,
+    vmax: float = 1.0,
+    dtype: np.dtype = np.float32,
+) -> np.ndarray:
+    """Get a gradient in fsaverage space.
+    # coronal: inferior - superior
+    # transverse: posterior - anterior
+    # saggital: lateral - medial
+    """
+    gradimg = np.zeros((91, 109, 91), dtype=dtype)
+
+    # post-ant
+    if axis == "transverse":
+        grad = np.linspace(vmin, vmax, 109, dtype=gradimg.dtype)
+        for i, j in np.ndindex(91, 91):
+            gradimg[i, :, j] = grad
+    # ventral-dorsal
+    elif axis == "coronal":
+        grad = np.linspace(vmin, vmax, 91, dtype=gradimg.dtype)
+        for i, j in np.ndindex(91, 109):
+            gradimg[i, j, :] = grad
+    # lateral-medial
+    elif axis == "saggital":
+        grad = np.linspace(vmin, vmax, 91, dtype=gradimg.dtype)
+        for i, j in np.ndindex(109, 91):
+            gradimg[:, i, j] = grad
+
+    affine = np.array(
+        [
+            [-2.0, 0.0, 0.0, 90.0],
+            [0.0, 2.0, 0.0, -126.0],
+            [0.0, 0.0, 2.0, -72.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    new_nimg = nib.nifti1.Nifti1Image(gradimg, affine=affine)
+
+    gifL, gifR = mni152_to_fsaverage(new_nimg, method="linear")
+    fs_grad = np.concatenate((gifL.agg_data(), gifR.agg_data()))
+    return fs_grad

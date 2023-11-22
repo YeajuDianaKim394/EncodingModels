@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from constants import (
     ARPABET_PHONES,
+    CONFOUND_REGRESSORS,
     CONVS_FRIENDS,
     CONVS_STRANGERS,
     FNKEYS,
@@ -31,7 +32,7 @@ def confounds(args):
         ses="1",
         datatype="func",
         task="Conv",
-        run=1,
+        run=0,
         desc="confounds",
         suffix="timeseries",
         ext=".tsv",
@@ -224,9 +225,18 @@ def spectral(args):
 def cache(args):
     from util.subject import get_bold
 
-    confounds = MOTION_CONFOUNDS + ["framewise_displacement"]
     for sub in tqdm(args.subs):
-        _ = get_bold(sub, save_data=True, return_cofounds=confounds)
+        _ = get_bold(
+            sub,
+            save_data=True,
+            # run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS,  # runmot
+            run_confounds=CONFOUND_REGRESSORS,  # nomot
+            # trial_confounds=[],
+            trial_confounds=MOTION_CONFOUNDS,
+            return_confounds=["framewise_displacement"],
+            use_cache=False,
+            cache_desc="trialmot",
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#SBATCH --time=03:00:00          # total run time limit (HH:MM:SS)
-#SBATCH --mem=16G                 # memory per cpu-core (4G is default)
+#SBATCH --time=02:30:00          # total run time limit (HH:MM:SS)
+#SBATCH --mem=8G                 # memory per cpu-core (4G is default)
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
 #SBATCH --cpus-per-task=1        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -34,9 +34,11 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
     fi
 fi
 
+# --suffix _schaefer --save-weights --atlas schaefer
+
 for sub in "${subjects[@]}"; do
     echo $sub
-    python code/encoding.py -s "$sub" -j 1 -m model-gpt2-medium_layer-0.75 --save-weights
+    python code/encoding.py -s "$sub" -j 1 -m model-gpt2-xl_layer-0.75 --use-cache --cache-desc trialmot --suffix _motion-trialonly
 done
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

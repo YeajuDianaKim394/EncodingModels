@@ -146,6 +146,7 @@ MOTION_CONFOUNDS = [
     "rot_z_derivative1",
     "rot_z_power2",
     "rot_z_derivative1_power2",
+    "framewise_displacement",
 ]
 
 ARPABET_PHONES = [
