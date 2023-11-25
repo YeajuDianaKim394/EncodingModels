@@ -5,6 +5,7 @@ import numpy as np
 from brainspace.mesh.mesh_io import read_surface
 from neuromaps.datasets import fetch_fsaverage, fetch_fslr
 from neuromaps.transforms import fsaverage_to_fslr, mni152_to_fsaverage
+from neuromaps.transforms import fsaverage_to_fsaverage
 from nibabel.gifti.gifti import GiftiDataArray, GiftiImage
 from surfplot import Plot
 from surfplot.utils import threshold as surf_threshold
@@ -13,6 +14,14 @@ from .atlas import Atlas
 
 _image_cache = {}
 
+def upsample_fsaverage(values: np.ndarray, method: str = 'linear') -> np.ndarray:
+    dataL = values[:40962]
+    dataR = values[40962:]
+    gifL = nib.GiftiImage(darrays=(nib.gifti.gifti.GiftiDataArray(dataL),))
+    gifR = nib.GiftiImage(darrays=(nib.gifti.gifti.GiftiDataArray(dataR),))
+    gifLn, gifRn = fsaverage_to_fsaverage((gifL, gifR), '164k', hemi=('L', 'R'), method=method)
+    resampled_data = np.concatenate((gifLn.agg_data(), gifRn.agg_data()))
+    return resampled_data
 
 def get_surfplot(
     surface: str = "fsaverage",
