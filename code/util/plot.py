@@ -4,8 +4,11 @@ import nibabel as nib
 import numpy as np
 from brainspace.mesh.mesh_io import read_surface
 from neuromaps.datasets import fetch_fsaverage, fetch_fslr
-from neuromaps.transforms import fsaverage_to_fslr, mni152_to_fsaverage
-from neuromaps.transforms import fsaverage_to_fsaverage
+from neuromaps.transforms import (
+    fsaverage_to_fsaverage,
+    fsaverage_to_fslr,
+    mni152_to_fsaverage,
+)
 from nibabel.gifti.gifti import GiftiDataArray, GiftiImage
 from surfplot import Plot
 from surfplot.utils import threshold as surf_threshold
@@ -116,7 +119,7 @@ def surface_plot(
             gifR = GiftiImage(darrays=(GiftiDataArray(parc_mask[n_verts:]),))
             gifL, gifR = fsaverage_to_fslr((gifL, gifR), method="nearest")
             parc_mask = {"left": gifL, "right": gifR}
-        p.add_layer(parc_mask, cmap="Greys", as_outline=True, cbar=False, alpha=0.8)
+        p.add_layer(parc_mask, cmap="gray", as_outline=True, cbar=False)
 
     if fig is None and ax is None:
         fig = p.build()
