@@ -131,7 +131,7 @@ class Atlas:
         start = 2 if symmetric else 1
 
         networks = np.unique(
-            ["_".join(l.split("_")[start:3]) for l in self.labels]
+            ["_".join(lb.split("_")[start:3]) for lb in self.labels]
         ).tolist()
         network2id = {v: k for k, v in enumerate(networks, 1)}
         network2id["_".join(self.label(0).split("_")[start:3])] = 0
