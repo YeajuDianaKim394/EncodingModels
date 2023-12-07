@@ -1,3 +1,4 @@
+import h5py
 import nibabel as nib
 import numpy as np
 from netneurotools import datasets as nntdata
@@ -12,6 +13,7 @@ class Atlas:
         self.label_img = label_img
         self.id2label = labels
         self.label2id = {v: k for k, v in labels.items()}
+        self.parcel_vcount = None
 
     @property
     def labels(self) -> list[str]:
@@ -22,6 +24,12 @@ class Atlas:
 
     def key(self, label: str) -> int:
         return self.label2id.get(label)
+
+    def num_voxels(self, label: str) -> int:
+        if not self.parcel_vcount:
+            uniques = np.unique(self.label_img, return_counts=True)
+            self.parcel_vcount = {k: v for k, v in zip(*uniques)}
+        return self.parcel_vcount[label]
 
     def __getitem__(self, key) -> str | int:
         if isinstance(key, int):
@@ -75,6 +83,44 @@ class Atlas:
             roi_ids = np.array([self[r] if isinstance(r, str) else r for r in rois])
             return np.in1d(self.label_img, roi_ids)
 
+    def to_network(self, symmetric: bool = False):
+        network_img = np.zeros_like(self.label_img)
+        start = 2 if symmetric else 1
+
+        networks = np.unique(
+            ["_".join(lb.split("_")[start:3]) for lb in self.labels]
+        ).tolist()
+        network2id = {v: k for k, v in enumerate(networks, 1)}
+        network2id["_".join(self.label(0).split("_")[start:3])] = 0
+
+        id2network = {}
+        id2network[0] = self[0]
+        id2network |= {k: v for k, v in enumerate(networks, 1)}
+
+        for label, parc_id in self.label2id.items():
+            parc_net = "_".join(label.split("_")[start:3])
+            net_id = network2id[parc_net]
+            network_img[self.label_img == parc_id] = net_id
+
+        return Atlas(self.name, network_img, id2network)
+
+    def save(self, data_dir=DATADIR) -> None:
+        filepath = f"{data_dir}/{self.name}.hdf5"
+        with h5py.File(filepath, "w") as f:
+            f.create_dataset(name="label_img", data=self.label_img)
+            f.create_dataset(name="ids", data=list(self.id2label.keys()))
+            f.create_dataset(name="labels", data=list(self.id2label.values()))
+
+    @staticmethod
+    def load(atlas_name: str, data_dir=DATADIR):
+        filepath = f"{data_dir}/{atlas_name}.hdf5"
+        with h5py.File(filepath, "r") as f:
+            label_img = f["label_img"][...]
+            label_ids = f["ids"][...]
+            label_names = f["labels"][...]
+            labels = {lb_id: lb_name for lb_id, lb_name in zip(label_ids, label_names)}
+        return Atlas(atlas_name, label_img, labels)
+
     @staticmethod
     def schaefer2018(rois: int = 1000, networks: int = 17):
         filenames = nntdata.fetch_schaefer2018(version="fsaverage6", data_dir=DATADIR)
@@ -125,27 +171,6 @@ class Atlas:
         )
 
         return Atlas(atlasname, label_img, labels)
-
-    def to_network(self, symmetric: bool = False):
-        network_img = np.zeros_like(self.label_img)
-        start = 2 if symmetric else 1
-
-        networks = np.unique(
-            ["_".join(lb.split("_")[start:3]) for lb in self.labels]
-        ).tolist()
-        network2id = {v: k for k, v in enumerate(networks, 1)}
-        network2id["_".join(self.label(0).split("_")[start:3])] = 0
-
-        id2network = {}
-        id2network[0] = self[0]
-        id2network |= {k: v for k, v in enumerate(networks, 1)}
-
-        for label, parc_id in self.label2id.items():
-            parc_net = "_".join(label.split("_")[start:3])
-            net_id = network2id[parc_net]
-            network_img[self.label_img == parc_id] = net_id
-
-        return Atlas(self.name, network_img, id2network)
 
     @staticmethod
     def glasser2016(symmetric: bool = False):
@@ -198,3 +223,30 @@ class Atlas:
         id2label = {i: label for i, label in enumerate(labels)}
 
         return Atlas("langnet", lang_atlas, id2label)
+
+    @staticmethod
+    def lana2022():
+        from neuromaps.transforms import fsaverage_to_fsaverage
+
+        niiL = nib.load("mats/LH_LanA_n804.nii.gz")
+        niiR = nib.load("mats/RH_LanA_n804.nii.gz")
+        gifL = nib.GiftiImage(
+            darrays=(
+                nib.gifti.gifti.GiftiDataArray(
+                    niiL.get_fdata().squeeze().astype(np.float32)
+                ),
+            )
+        )
+        gifR = nib.GiftiImage(
+            darrays=(
+                nib.gifti.gifti.GiftiDataArray(
+                    niiR.get_fdata().squeeze().astype(np.float32)
+                ),
+            )
+        )
+        gifLn, gifRn = fsaverage_to_fsaverage(
+            (gifL, gifR), "41k", hemi=("L", "R"), method="linear"
+        )
+        resampled_data = np.concatenate((gifLn.agg_data(), gifRn.agg_data()))
+
+        return Atlas("LanA", resampled_data, {})
