@@ -6,6 +6,16 @@ from neuromaps.images import annot_to_gifti
 
 DATADIR = "mats"
 
+def get_brainmask():
+    """Get a brain mask to remove the medial wall"""
+    # !wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/fsaverage6/label/lh.Medial_wall.label
+    # !wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/fsaverage6/label/rh.Medial_wall.label
+    lh_medial_indices = nib.freesurfer.io.read_label("mats/lh.Medial_wall.label")
+    rh_medial_indices = nib.freesurfer.io.read_label("mats/rh.Medial_wall.label")
+    fgmask = np.ones(81924, dtype=bool)
+    fgmask[lh_medial_indices] = False
+    fgmask[rh_medial_indices + 40962] = False
+    return fgmask
 
 class Atlas:
     def __init__(self, name: str, label_img: np.ndarray, labels: dict):
@@ -118,7 +128,10 @@ class Atlas:
             label_img = f["label_img"][...]
             label_ids = f["ids"][...]
             label_names = f["labels"][...]
-            labels = {lb_id: lb_name for lb_id, lb_name in zip(label_ids, label_names)}
+            labels = {
+                lb_id: lb_name.decode()
+                for lb_id, lb_name in zip(label_ids, label_names)
+            }
         return Atlas(atlas_name, label_img, labels)
 
     @staticmethod
