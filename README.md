@@ -1,6 +1,5 @@
 # brain-to-brain hyperscanned fMRI conversations
 
-
 naming convention of conversations: conv-xxx is for subject 02 and 102
 subjects xx and 1xx are a dyad.
 
@@ -108,7 +107,7 @@ function t2aud() { awk -v OFS="\t" -F"," '{print $10,$11,$8}' "$1" | tail -n +2 
 See `requirements.txt` and:
 
 ```
-pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk statsmodels h5py netneurotools
+pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk statsmodels h5py netneurotools pyrcca
 ```
 
 surfplot errors on jupyter
@@ -138,4 +137,18 @@ wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parce
   4                         nvals = cm.N
   5                         table = cm(np.linspace(0, 1, nvals)) * 255
   6                     table = table.astype(np.uint8)
+ ```
+ ~surfplot/plotting.py:461
+ ```
+    def _add_colorbars(self, location='bottom', label_direction=None,   
+                       n_ticks=3, decimals=2, fontsize=10, draw_border=True, 
+                       outer_labels_only=False, aspect=20, pad=.08, shrink=.3, 
+                       fraction=.05, fig=None, ax=None):
+            fig = plt if fig is None else fig
+            ax = ax if ax is not None else plt.gca()
+            cb = fig.colorbar(sm, ticks=ticks, location=location, 
+                              fraction=fraction, pad=cbar_pads[i], 
+                              shrink=shrink, aspect=aspect, ax=ax)
+
+
  ```
