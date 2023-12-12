@@ -225,17 +225,31 @@ def spectral(args):
 def cache(args):
     from util.subject import get_bold
 
+    cache_params = {
+        "nomot": dict(
+            run_confounds=CONFOUND_REGRESSORS, trial_confounds=[], cache_desc="nomot"
+        ),
+        "runmot": dict(
+            run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS,
+            trial_confounds=[],
+            cache_desc="runmot",
+        ),
+        "trialmot": dict(
+            run_confounds=CONFOUND_REGRESSORS,
+            trial_confounds=MOTION_CONFOUNDS,
+            cache_desc="trialmot",
+        ),
+    }
+
+    params = cache_params["nomot"]
+
     for sub in tqdm(args.subs):
         _ = get_bold(
             sub,
             save_data=True,
-            # run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS,  # runmot
-            run_confounds=CONFOUND_REGRESSORS,  # nomot
-            # trial_confounds=[],
-            trial_confounds=MOTION_CONFOUNDS,
-            return_confounds=["framewise_displacement"],
             use_cache=False,
-            cache_desc="trialmot",
+            return_confounds=["framewise_displacement"],
+            **params,
         )
 
 
