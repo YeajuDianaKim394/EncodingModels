@@ -303,7 +303,7 @@ def build_model(
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
     params = dict(
-        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=100
+        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=200
     )
     mkr_model = MultipleKernelRidgeCV(kernels="precomputed", solver_params=params)
     pipeline = make_pipeline(
@@ -332,12 +332,6 @@ def main(args):
         sub, atlas=args.atlas, use_cache=args.use_cache, cache_desc=args.cache_desc
     )
 
-    if args.atlas is not None:
-        # atlasname = args.atlas
-        atlas = Atlas.schaefer(parcels=1000, kong=True)
-        Y_bold = atlas.vox_to_parc(Y_bold)
-        print(Y_bold.shape)
-
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
@@ -354,7 +348,7 @@ def main(args):
 
         # Compute correlation based on masked prod/comp
         # NOTE 1 and 5 indexing may change below depending on features
-        prod_mask = X_test[:, 1].astype(bool)
+        prod_mask = X_test[:, 1:2]  # .astype(bool)
         # comp_mask = X_test[:, 5].astype(bool)
         prod_mask = delayer.fit_transform(prod_mask).any(-1)
         comp_mask = np.logical_not(prod_mask)
@@ -374,10 +368,12 @@ def main(args):
             weights_prod = weights[-2]
             weights_prod_delay = weights_prod.reshape(-1, 4, weights_prod.shape[-1])
             weights_prod = weights_prod_delay.mean(1)
+            # weights_prod = torch.linalg.vector_norm(weights_prod_delay, dim=0)
 
             weights_comp = weights[-1]
             weights_comp_delay = weights_comp.reshape(-1, 4, weights_comp.shape[-1])
             weights_comp = weights_comp_delay.mean(1)
+            # weights_comp = torch.linalg.vector_norm(weights_comp_delay, dim=0)
 
             results["cv_weights_prod"].append(weights_prod)
             results["cv_weights_comp"].append(weights_comp)
@@ -387,6 +383,7 @@ def main(args):
         results["cv_scores_comp"].append(scores_comp.numpy(force=True))
         results["cv_alphas"].append(enc_model.best_alphas_.numpy(force=True))
         results["cv_preds"].append(Y_preds.numpy(force=True))
+        results["cv_prodmask"].append(prod_mask)
 
     # stack across folds
     result = {k: np.stack(v) for k, v in results.items()}
