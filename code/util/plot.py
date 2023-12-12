@@ -17,14 +17,18 @@ from .atlas import Atlas
 
 _image_cache = {}
 
-def upsample_fsaverage(values: np.ndarray, method: str = 'linear') -> np.ndarray:
+
+def upsample_fsaverage(values: np.ndarray, method: str = "linear") -> np.ndarray:
     dataL = values[:40962]
     dataR = values[40962:]
     gifL = nib.GiftiImage(darrays=(nib.gifti.gifti.GiftiDataArray(dataL),))
     gifR = nib.GiftiImage(darrays=(nib.gifti.gifti.GiftiDataArray(dataR),))
-    gifLn, gifRn = fsaverage_to_fsaverage((gifL, gifR), '164k', hemi=('L', 'R'), method=method)
+    gifLn, gifRn = fsaverage_to_fsaverage(
+        (gifL, gifR), "164k", hemi=("L", "R"), method=method
+    )
     resampled_data = np.concatenate((gifLn.agg_data(), gifRn.agg_data()))
     return resampled_data
+
 
 def get_surfplot(
     surface: str = "fsaverage",
@@ -139,10 +143,10 @@ def surface_plot(
         ax.axis("off")
 
         if cbar:
-            p._add_colorbars()
+            p._add_colorbars(fig=fig, ax=ax)
 
         if title is not None:
-            ax.set_title(title + f" ({vmin:.3f}, {vmax:.3f})")
+            ax.set_title(title)
 
     return fig
 
