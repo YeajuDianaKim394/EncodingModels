@@ -177,6 +177,92 @@ def get_lexical_embs():
     return embeddings
 
 
+# short names for long model names
+EMBEDDINGS = {
+    "llama2-7b": "meta-llama/Llama-2-7b-hf",
+    "mistral-7b": "mistralai/Mistral-7B-v0.1",
+    "gptneo-3b": "EleutherAI/gpt-neo-2.7B",
+}
+
+def get_llm_embs(modelname: str, layer=0):
+    import h5py
+    from transformers import AutoTokenizer
+
+    hfmodelname = EMBEDDINGS[modelname]
+
+    df = pd.read_csv("mats/black_transcript.csv")
+    df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
+
+    # Tokenize input
+    tokenizer = AutoTokenizer.from_pretrained(hfmodelname)
+    df.insert(0, "word_idx", df.index.values)
+    df["hftoken"] = df.word.apply(tokenizer.tokenize)
+    df = df.explode("hftoken", ignore_index=True)
+    df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
+
+    with h5py.File(f"features/black/{modelname}/states.hdf5", "r") as f:
+        states = f[f"layer{layer}"][:-1, :]  # (seq_len, dim) - skip last embedding
+
+    n_features = states.shape[1]
+    embeddings = np.zeros((TRS, n_features), dtype=np.float32)
+
+    # Loop through TRs
+    for tr in range(TRS):
+        mask = (df.TR == tr).values.astype(bool)
+        if mask.any():
+            embeddings[tr] = states[mask].mean(0)
+
+    return embeddings
+
+
+def extract_llm_embs(modelname: str, device: str="cpu"):
+    """
+    to download the models:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        token = 'hf_<TOKEN>'  # for llama only
+        modelname = "meta-llama/Llama-2-13b-hf"
+        tokenizer = AutoTokenizer.from_pretrained(modelname, token=token)
+        model = AutoModelForCausalLM.from_pretrained(modelname, token=token)
+
+    to extract:
+        salloc --time=00:10:00 --gres=gpu:1 --mem=32G
+        python code/black_encoding.py -m mistral-7b
+    """
+    import h5py
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    hfmodelname = EMBEDDINGS[modelname]
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda", 0)
+
+    df = pd.read_csv("mats/black_transcript.csv")
+
+    # Tokenize input
+    tokenizer = AutoTokenizer.from_pretrained(hfmodelname)
+    df.insert(0, "word_idx", df.index.values)
+    df["hftoken"] = df.word.apply(tokenizer.tokenize)
+    df = df.explode("hftoken", ignore_index=True)
+    df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
+
+    tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
+    batch = torch.tensor([tokenids], dtype=torch.long, device=device)
+
+    model = AutoModelForCausalLM.from_pretrained(hfmodelname)
+    model = model.eval()
+    model = model.to(device)
+
+    with torch.no_grad():
+        output = model(batch, output_hidden_states=True)
+        states = output.hidden_states
+
+    with h5py.File(f"features/black/{modelname}/states.hdf5", "w") as f:
+        for layer in range(len(states)):
+            layer_states = states[layer].squeeze().numpy(force=True)
+            f.create_dataset(name=f"layer{layer}", data=layer_states)
+
+
 def get_bold(sub: int) -> np.ndarray:
     boldpath = Path(
         root="data/derivatives/fmriprep/",
@@ -214,8 +300,9 @@ def get_bold(sub: int) -> np.ndarray:
     return Y_bold
 
 
-def build_regressors():
-    lexical_embs = get_lexical_embs()
+def build_regressors(hfmodelname=None, layer=0):
+    # lexical_embs = get_lexical_embs()
+    lexical_embs = get_llm_embs(layer=layer)
     phone_rates, phone_embs = get_phoneme_features()
     word_onsets, word_rates = get_transcript_features()
     spectral_features = get_spectral_features()
@@ -276,7 +363,9 @@ def build_model(
 
 
 def main(args):
-    X, features = build_regressors()
+    layer = args.layer
+
+    X, features = build_regressors(layer=layer)
     feature_names = list(features.keys())
     slices = list(features.values())
 
@@ -309,10 +398,11 @@ def main(args):
 
         # save
         pklpath = Path(
-            root="encoding",
+            root="encoding/black",
             sub=f"{sub:03d}",
             datatype=args.model,
             task="Black",
+            desc=f"layer-{layer}",
             ext=".hdf5",
         )
         pklpath.mkdirs()
@@ -325,7 +415,8 @@ if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", type=str, default="model-gpt2")
+    parser.add_argument("-m", "--model", type=str, default="llama2-7b")
+    parser.add_argument("--layer", type=int, default=0)
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -338,4 +429,5 @@ if __name__ == "__main__":
         else:
             print("[WARN] cuda not available")
 
-    main(args)
+    # main(args)
+    extract_llm_embs(modelname=args.model)
