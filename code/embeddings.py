@@ -1,4 +1,10 @@
 """Add embeddings to an events file that has words.
+
+    salloc --mem=32G --time=00:15:00 --gres=gpu:1
+    python code/embeddings.py -m gpt2-xl --layer 24
+    python code/embeddings.py -m gptneo-3b --layer 16
+    python code/embeddings.py -m llama2-7b --layer 16
+    python code/embeddings.py -m llama2-7b-chat --layer 16
 """
 
 from glob import glob
@@ -15,17 +21,14 @@ from util.path import Path
 # short names for long model names
 EMBEDDINGS = {
     "llama2-7b": "meta-llama/Llama-2-7b-hf",
+    "llama2-7b-chat": "meta-llama/Llama-2-7b-chat-hf",
     "mistral-7b": "mistralai/Mistral-7B-v0.1",
     "gptneo-3b": "EleutherAI/gpt-neo-2.7B",
 }
 
 
-def main(hfmodelname: str, device: str = "cpu", layer: int = 0, **kwargs):
-    """Reimplemented to share model across iterations and for models with big context size.
-
-    salloc --mem=32G --time=00:15:00 --gres=gpu:1
-    python code/embeddings.py -m llama2-7b --layer 16
-    """
+def main(hfmodelname: str, device: str = "cpu", layer: int = 0):
+    """Reimplemented to share model across iterations and for models with big context size."""
 
     dirname = f"model-{args.model}"
     if args.layer != -1:
@@ -41,9 +44,13 @@ def main(hfmodelname: str, device: str = "cpu", layer: int = 0, **kwargs):
         raise FileNotFoundError("No files found for: " + search_str)
     print(f"Found {len(files)} transcripts")
 
+    tokenizer_args = dict()
+    if "gpt2" in hfmodelname:
+        tokenizer_args["add_prefix_space"] = True
+
     # Load model
     print("Loading model")
-    tokenizer = AutoTokenizer.from_pretrained(hfmodelname)
+    tokenizer = AutoTokenizer.from_pretrained(hfmodelname, **tokenizer_args)
     model = AutoModelForCausalLM.from_pretrained(hfmodelname)
     model = model.eval()
     model = model.to(device)
@@ -65,7 +72,7 @@ def main(hfmodelname: str, device: str = "cpu", layer: int = 0, **kwargs):
         # Run through model
         with torch.no_grad():
             output = model(batch, output_hidden_states=True)
-            states = output.hidden_states[layer][0, :-1].numpy(force=True)  # NOTE n or n-1
+            states = output.hidden_states[layer][0, 1:].numpy(force=True)
 
         df["embedding"] = [e for e in states]
 
@@ -79,15 +86,9 @@ if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    # parser.add_argument("-c", "--conv", type=int)
-    # parser.add_argument("-r", "--run", type=int)
-    # parser.add_argument("-t", "--trial", type=int)
     parser.add_argument("-m", "--model", default="glove-50")
-    # parser.add_argument("--maxlen", type=int, default=None)
     parser.add_argument("--layer", type=int, default=-1)
     parser.add_argument("--cuda", type=int, default=0)
-    # parser.add_argument("--ndim", type=int, default=None)
-    # parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force-cpu", action="store_true")
     args = parser.parse_args()
 
