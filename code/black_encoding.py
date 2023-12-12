@@ -184,6 +184,7 @@ EMBEDDINGS = {
     "gptneo-3b": "EleutherAI/gpt-neo-2.7B",
 }
 
+
 def get_llm_embs(modelname: str, layer=0):
     import h5py
     from transformers import AutoTokenizer
@@ -201,7 +202,7 @@ def get_llm_embs(modelname: str, layer=0):
     df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
 
     with h5py.File(f"features/black/{modelname}/states.hdf5", "r") as f:
-        states = f[f"layer{layer}"][:-1, :]  # (seq_len, dim) - skip last embedding
+        states = f[f"layer{layer}"][1:, :]  # (seq_len, dim) - skip first embedding (n)
 
     n_features = states.shape[1]
     embeddings = np.zeros((TRS, n_features), dtype=np.float32)
@@ -215,7 +216,7 @@ def get_llm_embs(modelname: str, layer=0):
     return embeddings
 
 
-def extract_llm_embs(modelname: str, device: str="cpu"):
+def extract_llm_embs(modelname: str, device: str = "cpu"):
     """
     to download the models:
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -256,6 +257,7 @@ def extract_llm_embs(modelname: str, device: str="cpu"):
     with torch.no_grad():
         output = model(batch, output_hidden_states=True)
         states = output.hidden_states
+        print(len(states), states[0].shape)
 
     with h5py.File(f"features/black/{modelname}/states.hdf5", "w") as f:
         for layer in range(len(states)):
@@ -300,9 +302,9 @@ def get_bold(sub: int) -> np.ndarray:
     return Y_bold
 
 
-def build_regressors(hfmodelname=None, layer=0):
+def build_regressors(modelname=None, layer=0):
     # lexical_embs = get_lexical_embs()
-    lexical_embs = get_llm_embs(layer=layer)
+    lexical_embs = get_llm_embs(modelname=modelname, layer=layer)
     phone_rates, phone_embs = get_phoneme_features()
     word_onsets, word_rates = get_transcript_features()
     spectral_features = get_spectral_features()
@@ -365,7 +367,7 @@ def build_model(
 def main(args):
     layer = args.layer
 
-    X, features = build_regressors(layer=layer)
+    X, features = build_regressors(modelname=args.model, layer=layer)
     feature_names = list(features.keys())
     slices = list(features.values())
 
@@ -429,5 +431,5 @@ if __name__ == "__main__":
         else:
             print("[WARN] cuda not available")
 
-    # main(args)
-    extract_llm_embs(modelname=args.model)
+    main(args)
+    # extract_llm_embs(modelname=args.model)

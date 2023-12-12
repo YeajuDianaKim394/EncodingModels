@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=1        # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --job-name=blenc         # create a short name for your job
 #SBATCH --gres=gpu:1             # get a gpu
-#SBATCH --array=0-33             # layer
+#SBATCH --array=16             # layer
 #SBATCH -o 'logs/%A_%a_black.log'
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=zzada@princeton.edu
@@ -25,6 +25,10 @@ echo "${CONDA_PROMPT_MODIFIER}Start time:" `date`
 export TQDM_DISABLE=1
 export TOKENIZERS_PARALLELISM=false
 
-python code/black_encoding.py --layer="$SLURM_ARRAY_TASK_ID"
+modelname=llama2-7b
+modelname=gptneo-3b
+modelname=mistral-7b
+
+python code/black_encoding.py -m "$modelname" --layer="$SLURM_ARRAY_TASK_ID"
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`
