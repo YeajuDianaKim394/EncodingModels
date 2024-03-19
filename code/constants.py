@@ -8,6 +8,9 @@ TRIALS = (1, 2, 3, 4)
 NTRIALS = len(TRIALS)
 NRUNS = len(RUNS)
 
+BLU = '#0173b2'
+ORG = '#de8f05'
+
 RUN_TRS = 544
 TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
 CONV_TRS = 120
@@ -121,33 +124,27 @@ CONFOUND_REGRESSORS = [
     "cosine10",
 ]
 
-MOTION_CONFOUNDS = [
-    "trans_x",
-    "trans_x_derivative1",
-    "trans_x_derivative1_power2",
-    "trans_x_power2",
-    "trans_y",
-    "trans_y_derivative1",
-    "trans_y_derivative1_power2",
-    "trans_y_power2",
-    "trans_z",
-    "trans_z_derivative1",
-    "trans_z_derivative1_power2",
-    "trans_z_power2",
-    "rot_x",
-    "rot_x_derivative1",
-    "rot_x_derivative1_power2",
-    "rot_x_power2",
-    "rot_y",
-    "rot_y_derivative1",
-    "rot_y_derivative1_power2",
-    "rot_y_power2",
-    "rot_z",
-    "rot_z_derivative1",
-    "rot_z_power2",
-    "rot_z_derivative1_power2",
-    "framewise_displacement",
-]
+MOTION_CONFOUNDS = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
+
+#     "trans_x_derivative1",
+#     "trans_y_derivative1",
+#     "trans_z_derivative1",
+#     "trans_x_derivative1_power2",
+#     "trans_y_derivative1_power2",
+#     "trans_z_derivative1_power2",
+#     "rot_x_derivative1",
+#     "rot_y_derivative1",
+#     "rot_z_derivative1",
+#     "rot_x_derivative1_power2",
+#     "rot_y_derivative1_power2",
+#     "rot_z_derivative1_power2",
+#     "trans_x_power2",
+#     "trans_y_power2",
+#     "trans_z_power2",
+#     "rot_x_power2",
+#     "rot_y_power2",
+#     "rot_z_power2",
+#     "framewise_displacement",
 
 ARPABET_PHONES = [
     "B",
