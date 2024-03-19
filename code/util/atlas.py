@@ -6,6 +6,7 @@ from neuromaps.images import annot_to_gifti
 
 DATADIR = "mats"
 
+
 def get_brainmask():
     """Get a brain mask to remove the medial wall"""
     # !wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/fsaverage6/label/lh.Medial_wall.label
@@ -17,6 +18,7 @@ def get_brainmask():
     fgmask[rh_medial_indices + 40962] = False
     return fgmask
 
+
 class Atlas:
     def __init__(self, name: str, label_img: np.ndarray, labels: dict):
         self.name = name
@@ -24,10 +26,7 @@ class Atlas:
         self.id2label = labels
         self.label2id = {v: k for k, v in labels.items()}
         self.parcel_vcount = None
-
-    @property
-    def labels(self) -> list[str]:
-        return list(self.label2id.keys())[1:]
+        self.labels = list(self.label2id.keys())[1:]
 
     def label(self, key: int) -> str:
         return self.id2label.get(key)
