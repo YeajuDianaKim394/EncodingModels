@@ -1,5 +1,8 @@
+"""Story encoding"""
+import json
 from collections import defaultdict
 from io import StringIO
+from os import makedirs
 
 import h5py
 import numpy as np
@@ -12,6 +15,7 @@ from constants import (
     SUBS_STRANGERS,
     TR,
 )
+from embeddings import HFMODELS
 from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score_split
@@ -177,19 +181,11 @@ def get_lexical_embs():
     return embeddings
 
 
-# short names for long model names
-EMBEDDINGS = {
-    "llama2-7b": "meta-llama/Llama-2-7b-hf",
-    "mistral-7b": "mistralai/Mistral-7B-v0.1",
-    "gptneo-3b": "EleutherAI/gpt-neo-2.7B",
-}
-
-
 def get_llm_embs(modelname: str, layer=0):
     import h5py
     from transformers import AutoTokenizer
 
-    hfmodelname = EMBEDDINGS[modelname]
+    hfmodelname = HFMODELS[modelname]
 
     df = pd.read_csv("mats/black_transcript.csv")
     df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
@@ -233,7 +229,7 @@ def extract_llm_embs(modelname: str, device: str = "cpu"):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    hfmodelname = EMBEDDINGS[modelname]
+    hfmodelname = HFMODELS[modelname]
 
     if torch.cuda.is_available():
         device = torch.device("cuda", 0)
@@ -255,14 +251,39 @@ def extract_llm_embs(modelname: str, device: str = "cpu"):
     model = model.to(device)
 
     with torch.no_grad():
-        output = model(batch, output_hidden_states=True)
+        output = model(batch, labels=batch, output_hidden_states=True)
         states = output.hidden_states
-        print(len(states), states[0].shape)
 
-    with h5py.File(f"features/black/{modelname}/states.hdf5", "w") as f:
+        loss = output.loss
+        logits = output.logits[0]
+
+        logits_order = logits.argsort(descending=True, dim=-1)
+        ranks = torch.eq(logits_order[:-1], batch[:, 1:].T).nonzero()[:, 1]
+
+        probs = logits[:-1, :].softmax(-1)
+        true_probs = probs[0, batch[0, 1:]]
+
+        entropy = torch.distributions.Categorical(probs=probs).entropy()
+
+    df["rank"] = ranks.numpy(force=True)
+    df["true_prob"] = true_probs.numpy(force=True)
+    df["entropy"] = entropy.numpy(force=True)
+
+    metrics = dict(top1_acc=(df["rank"] == 0).mean(), perplexity=loss.exp().item())
+    print(metrics)
+
+    outdir = f"features/black/{modelname}"
+    makedirs(outdir, exist_ok=True)
+
+    with h5py.File(f"{outdir}/states.hdf5", "w") as f:
         for layer in range(len(states)):
             layer_states = states[layer].squeeze().numpy(force=True)
             f.create_dataset(name=f"layer{layer}", data=layer_states)
+
+    with open(f"{outdir}/performance.json", "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    df.to_csv(f"{outdir}/transcript.csv")
 
 
 def get_bold(sub: int) -> np.ndarray:
@@ -336,13 +357,14 @@ def build_model(
     alphas: np.ndarray,
     verbose: int,
     n_jobs: int,
+    delayer_class=Delayer,
 ):
     """Build the pipeline"""
 
     # Set up modeling pipeline
     delayer_pipeline = make_pipeline(
         StandardScaler(with_mean=True, with_std=False),
-        Delayer(delays=[2, 3, 4, 5]),
+        delayer_class(delays=[2, 3, 4, 5]),
         Kernelizer(kernel="linear"),
     )
 
@@ -379,12 +401,31 @@ def main(args):
     subs.remove(111)
     subs.remove(12)
 
-    for sub in tqdm(subs):
-        Y_bold = get_bold(sub)
+    cache_path = Path(
+        root="data/derivatives/cleaned",
+        datatype="func",
+        sub="000",
+        task="Black",
+        space="fsaverage6",
+        suffix="bold",
+        ext="hdf5",
+    )
 
+    for sub in tqdm(subs):
+        # get BOLD data
+        cache_path.update(sub=f"{sub:03d}")
+        if cache_path.isfile():
+            with h5py.File(cache_path, "r") as f:
+                Y_bold = f["bold"][...]
+        else:
+            Y_bold = get_bold(sub)
+            with h5py.File(cache_path, "w") as f:
+                f.create_dataset(name="bold", data=Y_bold)
+
+        K = 2
         results = defaultdict(list)
-        kfold = KFold(n_splits=5)
-        for train_index, test_index in tqdm(kfold.split(X), leave=False, total=5):
+        kfold = KFold(n_splits=K)
+        for train_index, test_index in tqdm(kfold.split(X), leave=False, total=K):
             X_train, X_test = X[train_index], X[test_index]
             Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
 
@@ -394,6 +435,7 @@ def main(args):
             scores_split = correlation_score_split(Y_test, Y_preds)
 
             results["cv_scores"].append(scores_split.numpy(force=True))
+            results["cv_preds"].append(Y_preds.numpy(force=True))
 
         # stack across folds
         result = {k: np.stack(v) for k, v in results.items()}
@@ -402,9 +444,7 @@ def main(args):
         pklpath = Path(
             root="encoding/black",
             sub=f"{sub:03d}",
-            datatype=args.model,
-            task="Black",
-            desc=f"layer-{layer}",
+            datatype=f"model-{args.model}_layer-{layer}",
             ext=".hdf5",
         )
         pklpath.mkdirs()
@@ -417,8 +457,8 @@ if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", type=str, default="llama2-7b")
-    parser.add_argument("--layer", type=int, default=0)
+    parser.add_argument("-m", "--model", type=str, default="opt-7b")
+    parser.add_argument("--layer", type=int, default=23)
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -431,5 +471,6 @@ if __name__ == "__main__":
         else:
             print("[WARN] cuda not available")
 
+    print(args)
     main(args)
     # extract_llm_embs(modelname=args.model)
