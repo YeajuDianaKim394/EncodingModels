@@ -21,7 +21,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from util.atlas import Atlas
 from util.path import Path
 from util.subject import get_bold, get_button_presses, get_transcript
 
@@ -65,7 +64,7 @@ class SplitDelayer(BaseEstimator, TransformerMixin):
         return X_delayed
 
 
-def build_regressors(subject: int, modelname: str):
+def get_regressors(subject: int, modelname: str):
     conv = str(subject + 100 if subject < 100 else subject)
     dfemb = get_transcript(conv=conv, modelname=modelname)
     dfphone = get_transcript(conv=conv, modelname="articulatory")
@@ -188,46 +187,31 @@ def build_regressors(subject: int, modelname: str):
     regressors["prod_motion_emb"] = prod_confemb
     regressors["comp_motion_emb"] = comp_confemb
 
-    # spaces = {
-    #     "prod_task": [
-    #         "prod_button_press",
-    #         "prod_screen",
-    #         "prod_onset",
-    #         "prod_word_rate",
-    #         "prod_phoneme_rate",
-    #     ],
-    #     "prod_spectral": ["prod_spectral_emb"],
-    #     "prod_articulation": ["prod_phoneme_emb"],
-    #     "comp_task": [
-    #         "comp_screen",
-    #         "comp_onset",
-    #         "comp_word_rate",
-    #         "comp_phoneme_rate",
-    #     ],
-    #     "comp_spectral": ["comp_spectral_emb"],
-    #     "comp_articulation": ["comp_phoneme_emb"],
-    #     "prod_semantic": ["prod_lexical_emb"],
-    #     "comp_semantic": ["comp_lexical_emb"],
-    # }
+    return regressors
 
-    spaces = {
-        "task": [
-            "prod_button_press",
-            "prod_screen",
-            "prod_onset",
-            "prod_word_rate",
-            "prod_phoneme_rate",
-            "comp_screen",
-            "comp_onset",
-            "comp_word_rate",
-            "comp_phoneme_rate",
-        ],
-        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
-        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
-        "motion": ["prod_motion_emb", "comp_motion_emb"],
-        "prod_semantic": ["prod_lexical_emb"],
-        "comp_semantic": ["comp_lexical_emb"],
-    }
+
+def build_regressors(subject: int, modelname: str, spaces: dict = None):
+    regressors = get_regressors(subject, modelname)
+
+    if spaces is None:
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            # "motion": ["prod_motion_emb", "comp_motion_emb"],
+            "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
+            "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
+            "prod_semantic": ["prod_lexical_emb"],
+            "comp_semantic": ["comp_lexical_emb"],
+        }
 
     X = []
     start = 0
@@ -303,7 +287,7 @@ def build_model(
     column_kernelizer = ColumnKernelizer(kernelizers_tuples, n_jobs=n_jobs)
 
     params = dict(
-        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=200
+        alphas=alphas, progress_bar=verbose, diagonalize_method="svd", n_iter=100
     )
     mkr_model = MultipleKernelRidgeCV(kernels="precomputed", solver_params=params)
     pipeline = make_pipeline(
@@ -406,7 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     args.alphas = np.logspace(0, 19, 20)
-    print(datetime.now(), "Start")
+    print(datetime.now(), "Start", args.model, args.cache_desc)
 
     if args.cuda > 0:
         if torch.cuda.is_available():
