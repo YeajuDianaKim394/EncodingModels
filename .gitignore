@@ -10,6 +10,7 @@ features
 figures
 logs
 mats
+models
 scripts
 *.dict
 *.txt

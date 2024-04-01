@@ -1,7 +1,8 @@
 """Add embeddings to an events file that has words.
 
     salloc --mem=32G --time=00:15:00 --gres=gpu:1
-    python code/embeddings.py -m gpt2-xl --layer 24
+    python code/embeddings.py -m gpt2-2b --layer 24
+    python code/embeddings.py -m gpt2-2b --layer 0 --force-cpu
 """
 
 from glob import glob
@@ -96,6 +97,7 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
     )
     model = model.eval()
     model = model.to(device)
+    # staticEmbeddingTable = model.lm_head.weight
 
     metrics = {}
     dirname = f"model-{modelname}_layer-{layer}"
@@ -113,6 +115,10 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
         # Set up input
         tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
         batch = torch.tensor([tokenids], dtype=torch.long, device=device)
+
+        # Static embedding lookup
+        # with torch.no_grad():
+        #     states = staticEmbeddingTable[batch][0, 1:].numpy(force=True)
 
         # Run through model
         with torch.no_grad():

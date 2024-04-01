@@ -170,6 +170,80 @@ UW,vowel,,,,high,back,,"""
         df.to_pickle(transpath)
 
 
+def syntactic(args):
+    import spacy
+    from sklearn.preprocessing import LabelBinarizer
+
+    nlp = spacy.load(
+        "en_core_web_sm", exclude=["toke2vec", "attribute_ruler", "lemmatizer", "ner"]
+    )
+
+    taggerEncoder = LabelBinarizer().fit(nlp.get_pipe("tagger").labels)
+    dependencyEncoder = LabelBinarizer().fit(nlp.get_pipe("parser").labels)
+
+    # Look for transcripts
+    transpath = Path(
+        root="stimuli", datatype="transcript", suffix="aligned", ext=".csv"
+    )
+    transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
+    search_str = transpath.starstr(["conv", "datatype"])
+    files = glob(search_str)
+    assert len(files), "No files found for: " + search_str
+
+    # Process transcripts
+    for filename in tqdm(files):
+        transpath = Path.frompath(filename)
+        transpath.update(root="stimuli", datatype="transcript")
+
+        df = pd.read_csv(transpath)
+
+        df.insert(0, "word_idx", df.index.values)
+        df["word_with_ws"] = df.word.astype(str) + " "
+        try:
+            df["hftoken"] = df.word_with_ws.apply(nlp.tokenizer)
+        except TypeError:
+            print("typeerror!")
+            breakpoint()
+        df = df.explode("hftoken", ignore_index=True)
+
+        features = []
+
+        for _, sentence in df.groupby(["speaker", "sentence"]):
+            # create a doc from the pre-tokenized text then parse it for features
+            words = [token.text for token in sentence.hftoken.tolist()]
+            spaces = [token.whitespace_ for token in sentence.hftoken.tolist()]
+            doc = spacy.tokens.Doc(nlp.vocab, words=words, spaces=spaces)
+            doc = nlp(doc)
+            for token in doc:
+                features.append([token.text, token.tag_, token.dep_, token.is_stop])
+
+        df2 = pd.DataFrame(
+            features, columns=["token", "pos", "dep", "stop"], index=df.index
+        )
+        df = pd.concat([df, df2], axis=1)
+
+        # TODO drop punctuation rows?
+
+        # generate embeddings
+        a = taggerEncoder.transform(df.pos.tolist())
+        b = dependencyEncoder.transform(df.dep.tolist())
+        c = LabelBinarizer().fit_transform(df.stop.tolist())
+        embeddings = np.hstack((a, b, c))
+        # remove any uninformative dimensions or not
+        # if np.any(embeddings.sum(0) == 0):
+        #     print("WARNING: contains features with all 0s")
+        # embeddings = embeddings[:, embeddings.sum(0) > 0]
+
+        df["embedding"] = embeddings.tolist()
+
+        # not serializable
+        df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)
+
+        transpath.update(root="features", datatype="syntactic", ext=".pkl")
+        transpath.mkdirs()
+        df.to_pickle(transpath)
+
+
 def spectral(args):
     """Move and process transcripts."""
     from transformers import AutoFeatureExtractor
@@ -239,9 +313,15 @@ def cache(args):
             trial_confounds=MOTION_CONFOUNDS,
             cache_desc="trialmot",
         ),
+        "trialmot6": dict(
+            run_confounds=CONFOUND_REGRESSORS,
+            trial_confounds=MOTION_CONFOUNDS[:6],
+            cache_desc="trialmot6",
+        ),
     }
 
-    params = cache_params["nomot"]
+    params = cache_params["trialmot6"]
+    print(params)
 
     for sub in tqdm(args.subs):
         _ = get_bold(
@@ -280,6 +360,8 @@ if __name__ == "__main__":
         phonemes(args)
     elif args.feature == "confounds":
         confounds(args)
+    elif args.feature == "syntactic":
+        syntactic(args)
     elif args.feature == "cache":
         cache(args)
     else:

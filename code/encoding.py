@@ -4,6 +4,7 @@ Run an encoding model on BOLD data.
 https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/03_plot_wordnet_model.html
 https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/06_plot_banded_ridge_model.html
 """
+
 from argparse import ArgumentParser
 from collections import defaultdict
 from datetime import datetime
@@ -18,7 +19,7 @@ from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRi
 from himalaya.scoring import correlation_score_split
 from scipy.ndimage import binary_dilation
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import PredefinedSplit
+from sklearn.model_selection import KFold, PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from util.path import Path
@@ -234,26 +235,6 @@ def build_regressors(subject: int, modelname: str, spaces: dict = None):
     return X, slices
 
 
-def compress_regressors(X: np.ndarray, features: dict) -> (np.ndarray, dict):
-    """Compress regressors across production and comprehension,
-
-    removing this distinction."""
-    raise NotImplementedError
-    x_nuis = X[:, [0, 1, 2]]
-    x_in = X[:, 2:4].sum(axis=1, keepdims=True)
-    x_wr = X[:, 4:6].sum(axis=1, keepdims=True)
-    x_pr = X[:, 6:8].sum(axis=1, keepdims=True)
-    x_ph = X[:, 8:47] + X[:, 47:86]
-    x_lx = X[:, features["production"]] + X[:, features["comprehension"]]
-    Xnew = np.hstack((x_nuis, x_in, x_wr, x_pr, x_ph, x_lx))
-    features_new = dict(
-        nuisance=slice(0, 6),
-        phonemes=slice(6, 45),
-        lexical=slice(45, 1069),
-    )
-    return Xnew, features_new
-
-
 def build_model(
     feature_names: list[str],
     slices: list[slice],
@@ -302,11 +283,107 @@ def main(args):
     sub = args.subject
     modelname = args.model
 
-    X, features = build_regressors(sub, modelname)
-    # X, features = compress_regressors(X, features)
+    spaces = None
+    if modelname == "acoustic":
+        modelname = "model-gpt2-2b_layer-24"
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            "prod_spectral": ["prod_spectral_emb"],
+            "comp_spectral": ["comp_spectral_emb"],
+        }
+    elif modelname == "articulatory":
+        modelname = "model-gpt2-2b_layer-24"
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            "prod_articulatory": ["prod_phoneme_emb"],
+            "comp_articulatory": ["comp_phoneme_emb"],
+        }
+    elif modelname == "static":
+        modelname = "model-gpt2-2b_layer-0"
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            "prod_llm": ["prod_lexical_emb"],
+            "comp_llm": ["comp_lexical_emb"],
+        }
+    elif modelname == "contextual":
+        modelname = "model-gpt2-2b_layer-24"
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            "prod_llm": ["prod_lexical_emb"],
+            "comp_llm": ["comp_lexical_emb"],
+        }
+    elif modelname == "syntactic":
+        modelname = "syntactic"
+        spaces = {
+            "task": [
+                "prod_button_press",
+                "prod_screen",
+                "prod_onset",
+                "prod_word_rate",
+                "prod_phoneme_rate",
+                "comp_screen",
+                "comp_onset",
+                "comp_word_rate",
+                "comp_phoneme_rate",
+            ],
+            "prod_llm": ["prod_lexical_emb"],
+            "comp_llm": ["comp_lexical_emb"],
+        }
+
+    X, features = build_regressors(sub, modelname, spaces=spaces)
     X = X.astype(np.float32)
     feature_names = list(features.keys())
     slices = list(features.values())
+
+    # remove any uninformative dimensions for syntactic
+    missingMask = X.sum(0) > 0
+    if not np.all(missingMask):
+        # print("WARNING: contains features with all 0s")
+        n1 = (~missingMask[slices[1]]).sum()
+        n2 = (~missingMask[slices[2]]).sum()
+        X = X[:, missingMask]
+        slices[1] = slice(slices[1].start, slices[1].stop - n1)
+        slices[2] = slice(slices[2].start - n1, slices[2].stop - n1 - n2)
 
     delayer = SplitDelayer(delays=[2, 3, 4, 5])
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
@@ -319,21 +396,21 @@ def main(args):
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
-    for k, (train_index, test_index) in enumerate(kfold.split()):
+    # kfold = KFold(n_splits=2)
+    for k, (train_index, test_index) in enumerate(kfold.split(X)):
         X_train, X_test = X[train_index], X[test_index]
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
         print(datetime.now(), f"F{k+1}", X_train.shape, Y_train.shape)
 
-        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
+        # pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
         pipeline.fit(X_train, Y_train)
 
         Y_preds = pipeline.predict(X_test, split=True)
         scores_split = correlation_score_split(Y_test, Y_preds)
 
         # Compute correlation based on masked prod/comp
-        # NOTE 1 and 5 indexing may change below depending on features
-        prod_mask = X_test[:, 1:2]  # .astype(bool)
-        # comp_mask = X_test[:, 5].astype(bool)
+        # 1 index may change below depending on features
+        prod_mask = X_test[:, 1:2]
         prod_mask = delayer.fit_transform(prod_mask).any(-1)
         comp_mask = np.logical_not(prod_mask)
 
@@ -402,6 +479,7 @@ if __name__ == "__main__":
 
     print(datetime.now(), "Saving")
     desc = None
+    # desc = "folds-2"
     if args.atlas is not None:
         desc = args.atlas
     pklpath = Path(
