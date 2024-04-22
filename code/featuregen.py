@@ -11,6 +11,7 @@ from constants import (
     CONFOUND_REGRESSORS,
     CONVS_FRIENDS,
     CONVS_STRANGERS,
+    EXTRA_MOTION_CONFOUNDS,
     FNKEYS,
     MOTION_CONFOUNDS,
     PUNCTUATION,
@@ -221,6 +222,7 @@ def syntactic(args):
             features, columns=["token", "pos", "dep", "stop"], index=df.index
         )
         df = pd.concat([df, df2], axis=1)
+        breakpoint()
 
         # TODO drop punctuation rows?
 
@@ -308,29 +310,37 @@ def cache(args):
             trial_confounds=[],
             cache_desc="runmot",
         ),
+        "runmotextra": dict(
+            run_confounds=CONFOUND_REGRESSORS
+            + MOTION_CONFOUNDS
+            + EXTRA_MOTION_CONFOUNDS,
+            trial_confounds=[],
+            cache_desc="runmotextra",
+        ),
         "trialmot": dict(
             run_confounds=CONFOUND_REGRESSORS,
-            trial_confounds=MOTION_CONFOUNDS,
+            trial_confounds=MOTION_CONFOUNDS + EXTRA_MOTION_CONFOUNDS,
             cache_desc="trialmot",
         ),
         "trialmot6": dict(
             run_confounds=CONFOUND_REGRESSORS,
-            trial_confounds=MOTION_CONFOUNDS[:6],
+            trial_confounds=MOTION_CONFOUNDS,
             cache_desc="trialmot6",
         ),
     }
 
-    params = cache_params["trialmot6"]
-    print(params)
-
-    for sub in tqdm(args.subs):
-        _ = get_bold(
-            sub,
-            save_data=True,
-            use_cache=False,
-            return_confounds=["framewise_displacement"],
-            **params,
-        )
+    for desc, params in cache_params.items():
+        if desc != "trialmot":
+            continue  # NOTE
+        print(desc, params)
+        for sub in tqdm(args.subs):
+            _ = get_bold(
+                sub,
+                save_data=True,
+                use_cache=False,
+                return_confounds=["framewise_displacement"],
+                **params,
+            )
 
 
 if __name__ == "__main__":

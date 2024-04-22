@@ -31,5 +31,7 @@ modelname=opt-7b
 layer=23
 
 python code/black_encoding.py -m "$modelname" --layer="$layer"
+# python code/black_encoding.py -m syntactic
+# python code/black_encoding.py -m opt-7b --layer=23
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

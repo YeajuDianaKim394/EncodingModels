@@ -1,8 +1,11 @@
 """Add embeddings to an events file that has words.
 
+```
     salloc --mem=32G --time=00:15:00 --gres=gpu:1
     python code/embeddings.py -m gpt2-2b --layer 24
-    python code/embeddings.py -m gpt2-2b --layer 0 --force-cpu
+    python code/embeddings.py -m gpt2-2b --layer 0 --force-cpu  # static
+    python code/embeddings.py -m olmo-7b --layer 16  # 32 G mem
+```
 """
 
 from glob import glob
@@ -22,6 +25,13 @@ HFMODELS = {
     "opt-3b": "facebook/opt-2.7b",
     "opt-7b": "facebook/opt-6.7b",
     "opt-13b": "facebook/opt-13b",
+    "olmo-1b": "allenai/OLMo-1B",
+    "olmo-7b": "allenai/OLMo-7B",
+    "olmo-7b-chat": "allenai/OLMo-7B-Instruct",
+    "gemma-2b": "google/gemma-2b",
+    "gemma-2b-it": "google/gemma-1.1-2b-it",
+    "gemma-7b": "google/gemma-7b",
+    "gemma-7b-it": "google/gemma-1.1-7b-it",
     "llama-7b": "models/llama/7b",
     "llama2-7b": "meta-llama/Llama-2-7b-hf",
     # "llama2-7b-chat": "meta-llama/Llama-2-7b-chat-hf",
@@ -29,8 +39,8 @@ HFMODELS = {
     "neo-125m": "EleutherAI/gpt-neo-125m",
     "neo-1b": "EleutherAI/gpt-neo-1.3B",
     "neo-3b": "EleutherAI/gpt-neo-2.7B",
-    "gptj-6b": "EleutherAI/gpt-j-6b",
-    "gpt2-82m": "distilgpt2",
+    # "gptj-6b": "EleutherAI/gpt-j-6b",
+    # "gpt2-82m": "distilgpt2",
     "gpt2-124m": "gpt2",
     "gpt2-355m": "gpt2-medium",
     "gpt2-774m": "gpt2-large",
@@ -41,10 +51,17 @@ HFMODELS = {
 def get_model_metadata():
     records = []
     for modelname, hfmodelname in HFMODELS.items():
-        config = AutoConfig.from_pretrained(hfmodelname)
+        config = AutoConfig.from_pretrained(hfmodelname, trust_remote_code=True)
         n_layers = config.num_hidden_layers
         hidden_size = config.hidden_size
-        max_positions = config.max_position_embeddings
+        # if modelname.startswith("gpt2"):
+        #     breakpoint()
+        if "max_position_embeddings" in config.to_dict():
+            max_positions = config.max_position_embeddings
+        elif "n_positions" in config.to_dict():
+            max_positions = config.n_positions
+        else:
+            max_positions = config.max_sequence_length
         # params = config.num_parameters()
         records.append((modelname, n_layers, hidden_size, max_positions))
 
@@ -70,10 +87,14 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
         raise FileNotFoundError("No files found for: " + search_str)
     print(f"Found {len(files)} transcripts")
 
-    tokenizer_args = dict()
-    if "gpt2" in hfmodelname:
+    tokenizer_args = dict(
+        trust_remote_code=True, token="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"
+    )
+    if "gpt2" in hfmodelname or "opt" in hfmodelname:
         tokenizer_args["add_prefix_space"] = True
-    model_args = dict()
+    model_args = dict(
+        trust_remote_code=True, token="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"
+    )
     if "Llama-2" in hfmodelname:
         # https://huggingface.co/docs/transformers/main/model_doc/llama2#usage-tips
         # Setting config.pretraining_tp to a value different than 1 will
@@ -93,7 +114,8 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
         f"Model : {hfmodelname}"
         f"\nLayers: {model.config.num_hidden_layers} ({layer})"
         f"\nEmbDim: {model.config.hidden_size}"
-        f"\nCxtLen: {model.config.max_position_embeddings}"
+        f"\nTokens: {tokenizer}"
+        # f"\nCxtLen: {model.config.max_position_embeddings}"
     )
     model = model.eval()
     model = model.to(device)
@@ -113,7 +135,8 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
         df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
 
         # Set up input
-        tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
+        # tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
+        tokenids = [1] + df.token_id.tolist()
         batch = torch.tensor([tokenids], dtype=torch.long, device=device)
 
         # Static embedding lookup

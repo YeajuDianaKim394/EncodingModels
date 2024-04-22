@@ -375,15 +375,15 @@ def main(args):
     feature_names = list(features.keys())
     slices = list(features.values())
 
-    # remove any uninformative dimensions for syntactic
-    missingMask = X.sum(0) > 0
-    if not np.all(missingMask):
-        # print("WARNING: contains features with all 0s")
-        n1 = (~missingMask[slices[1]]).sum()
-        n2 = (~missingMask[slices[2]]).sum()
-        X = X[:, missingMask]
-        slices[1] = slice(slices[1].start, slices[1].stop - n1)
-        slices[2] = slice(slices[2].start - n1, slices[2].stop - n1 - n2)
+    # # remove any uninformative dimensions for syntactic only
+    # missingMask = X.sum(0) > 0
+    # if not np.all(missingMask):
+    #     # print("WARNING: contains features with all 0s")
+    #     n1 = (~missingMask[slices[1]]).sum()
+    #     n2 = (~missingMask[slices[2]]).sum()
+    #     X = X[:, missingMask]
+    #     slices[1] = slice(slices[1].start, slices[1].stop - n1)
+    #     slices[2] = slice(slices[2].start - n1, slices[2].stop - n1 - n2)
 
     delayer = SplitDelayer(delays=[2, 3, 4, 5])
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)

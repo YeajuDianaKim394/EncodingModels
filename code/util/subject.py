@@ -292,7 +292,6 @@ def get_bold(
             if conf_ret is not None:
                 conf_trials.append(conf_ret[trial_slice])
 
-    all_bold = None
     all_bold = np.vstack(bold_trials)
     if ensure_finite:
         all_bold = np.nan_to_num(all_bold, copy=False)

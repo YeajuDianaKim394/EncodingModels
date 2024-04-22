@@ -12,6 +12,7 @@ logs
 mats
 models
 scripts
+cache
 *.dict
 *.txt
 !requirements.txt

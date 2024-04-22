@@ -1,4 +1,5 @@
 """Story encoding"""
+
 import json
 from collections import defaultdict
 from io import StringIO
@@ -165,6 +166,83 @@ def get_phoneme_features():
     return phone_rates, phone_emb
 
 
+def get_syntactic_features():
+    import spacy
+    from sklearn.preprocessing import LabelBinarizer
+
+    nlp = spacy.load(
+        "en_core_web_sm", exclude=["toke2vec", "attribute_ruler", "lemmatizer", "ner"]
+    )
+
+    taggerEncoder = LabelBinarizer().fit(nlp.get_pipe("tagger").labels)
+    dependencyEncoder = LabelBinarizer().fit(nlp.get_pipe("parser").labels)
+
+    with open("stimuli/black_audio.json", "r") as f:
+        d = json.load(f)
+        df = pd.DataFrame(d["segments"])
+        df.insert(0, "segment_id", df.index.values)
+        df = df.explode("words")
+        df["word"] = df.words.apply(lambda x: x["word"])
+        df["score"] = df.words.apply(lambda x: x.get("score", np.nan))
+        df["onset"] = df.words.apply(lambda x: x.get("start", np.nan))
+        df["offset"] = df.words.apply(lambda x: x.get("end", np.nan))
+        df.drop("words", axis=1, inplace=True)
+        df.drop("text", axis=1, inplace=True)
+        df.ffill(inplace=True)
+
+    # df = pd.read_csv("mats/black_transcript.csv")
+    df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
+
+    df.insert(0, "word_idx", df.index.values)
+    df["word_with_ws"] = df.word.astype(str) + " "
+    try:
+        df["hftoken"] = df.word_with_ws.apply(nlp.tokenizer)
+    except TypeError:
+        print("typeerror!")
+        breakpoint()
+    df = df.explode("hftoken", ignore_index=True)
+
+    features = []
+
+    for _, sentence in df.groupby(["segment_id"]):
+        # create a doc from the pre-tokenized text then parse it for features
+        words = [token.text for token in sentence.hftoken.tolist()]
+        spaces = [token.whitespace_ for token in sentence.hftoken.tolist()]
+        doc = spacy.tokens.Doc(nlp.vocab, words=words, spaces=spaces)
+        doc = nlp(doc)
+        for token in doc:
+            features.append([token.text, token.tag_, token.dep_, token.is_stop])
+
+    df2 = pd.DataFrame(
+        features, columns=["token", "pos", "dep", "stop"], index=df.index
+    )
+    df = pd.concat([df, df2], axis=1)
+
+    # generate embeddings
+    a = taggerEncoder.transform(df.pos.tolist())
+    b = dependencyEncoder.transform(df.dep.tolist())
+    c = LabelBinarizer().fit_transform(df.stop.tolist())
+    features = np.hstack((a, b, c))
+    # remove any uninformative dimensions or not
+    if np.any(features.sum(0) == 0):
+        features = features[:, features.sum(0) > 0]
+    # df["embedding"] = embeddings.tolist()
+
+    # not serializable
+    df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)
+
+    n_features = features.shape[1]
+    embeddings = np.zeros((TRS, n_features), dtype=np.float32)
+
+    # Loop through TRs
+    for tr in range(TRS):
+        mask = (df.TR == tr).values.astype(bool)
+        if mask.any():
+            embeddings[tr] = features[mask].mean(0)
+
+    return embeddings
+
+
 def get_lexical_embs():
     df = pd.read_pickle("mats/black_model-gpt2-xl_layer-36.pkl")
     df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
@@ -325,27 +403,29 @@ def get_bold(sub: int) -> np.ndarray:
 
 def build_regressors(modelname=None, layer=0):
     # lexical_embs = get_lexical_embs()
-    lexical_embs = get_llm_embs(modelname=modelname, layer=layer)
+    # lexical_embs = get_llm_embs(modelname=modelname, layer=layer)
+    lexical_embs = get_syntactic_features()
     phone_rates, phone_embs = get_phoneme_features()
     word_onsets, word_rates = get_transcript_features()
-    spectral_features = get_spectral_features()
+    # spectral_features = get_spectral_features()
 
     X = np.hstack(
         (
             word_onsets.reshape(-1, 1),
             word_rates.reshape(-1, 1),
             phone_rates.reshape(-1, 1),
-            spectral_features,
-            phone_embs,
+            # spectral_features,
+            # phone_embs,
             lexical_embs,
         )
     )
 
     slices = {
         "task": slice(0, 3),
-        "spectral": slice(3, 3 + 80),
-        "phonetic": slice(3 + 80, 3 + 80 + 22),
-        "lexical": slice(3 + 80 + 22, X.shape[1]),
+        # "spectral": slice(3, 3 + 80),
+        # "phonetic": slice(3 + 80, 3 + 80 + 22),
+        # "lexical": slice(3 + 80 + 22, X.shape[1]),
+        "lexical": slice(3, X.shape[1]),
     }
 
     return X, slices
@@ -411,6 +491,7 @@ def main(args):
         ext="hdf5",
     )
 
+    bolds = []
     for sub in tqdm(subs):
         # get BOLD data
         cache_path.update(sub=f"{sub:03d}")
@@ -421,7 +502,13 @@ def main(args):
             Y_bold = get_bold(sub)
             with h5py.File(cache_path, "w") as f:
                 f.create_dataset(name="bold", data=Y_bold)
+        bolds.append(Y_bold)
+    
+    Y_bold = np.stack(bolds).mean(0)
+    print(Y_bold.shape, len(bolds))
 
+    # NOTE group
+    for sub in [0]:
         K = 2
         results = defaultdict(list)
         kfold = KFold(n_splits=K)
