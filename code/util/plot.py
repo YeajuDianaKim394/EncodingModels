@@ -1,5 +1,6 @@
 """Utilities to make the plotting life easier
 """
+
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -39,8 +40,8 @@ def get_surfplot(
     brightness: float = 0.7,
     sulc_alpha: float = 0.5,
     add_sulc: bool = False,
-    surf_lh_fn: str = "mats/suma-fsaverage6/lh.inf_100.gii",
-    surf_rh_fn: str = "mats/suma-fsaverage6/rh.inf_100.gii",
+    surf_lh_fn: str = "mats/suma-fsaverage6/lh.inf_120.gii",
+    surf_rh_fn: str = "mats/suma-fsaverage6/rh.inf_120.gii",
     **kwargs,
 ) -> Plot:
     """Get a basic Plot to add layers to."""
@@ -125,7 +126,12 @@ def surface_plot(
         values = {"left": gifL, "right": gifR}
 
     p.add_layer(
-        values, cmap=cmap, cbar=cbar, cbar_label=cbar_label, color_range=(vmin, vmax), zero_transparent=zeroNan,
+        values,
+        cmap=cmap,
+        cbar=cbar,
+        cbar_label=cbar_label,
+        color_range=(vmin, vmax),
+        zero_transparent=zeroNan,
     )
 
     if atlas is not None and atlas_mode == "outline":

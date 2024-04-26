@@ -6,17 +6,23 @@ from neuromaps.images import annot_to_gifti
 
 DATADIR = "mats"
 
+_FG_MASK = None
 
-def get_brainmask():
+
+def get_brainmask(force: bool = False):
     """Get a brain mask to remove the medial wall"""
     # !wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/fsaverage6/label/lh.Medial_wall.label
     # !wget https://github.com/ThomasYeoLab/CBIG/raw/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal/Parcellations/FreeSurfer5.3/fsaverage6/label/rh.Medial_wall.label
-    lh_medial_indices = nib.freesurfer.io.read_label("mats/lh.Medial_wall.label")
-    rh_medial_indices = nib.freesurfer.io.read_label("mats/rh.Medial_wall.label")
-    fgmask = np.ones(81924, dtype=bool)
-    fgmask[lh_medial_indices] = False
-    fgmask[rh_medial_indices + 40962] = False
-    return fgmask
+    global _FG_MASK
+    if _FG_MASK is None or force:
+        lh_medial_indices = nib.freesurfer.io.read_label("mats/lh.Medial_wall.label")
+        rh_medial_indices = nib.freesurfer.io.read_label("mats/rh.Medial_wall.label")
+        fgmask = np.ones(81924, dtype=bool)
+        fgmask[lh_medial_indices] = False
+        fgmask[rh_medial_indices + 40962] = False
+        _FG_MASK = fgmask
+
+    return _FG_MASK
 
 
 class Atlas:

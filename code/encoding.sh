@@ -7,7 +7,7 @@
 #SBATCH --job-name=enc           # create a short name for your job
 #SBATCH --gres=gpu:1             # get a gpu
 #SBATCH --array=1,2              # 0 does all subjects, 1 does 0XX and 2 does 1XX
-#SBATCH -o 'logs/%A_%a.log'
+#SBATCH -o 'logs/%A_%a-enc.log'
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=zzada@princeton.edu
 
@@ -38,14 +38,16 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
     fi
 fi
 
-modelname=model-gpt2-2b_layer-24
+# modelname=model-gpt2-2b_layer-24
+# modelname=en_core_web_lg
+
 # modelname=contextual
 # modelname=articulatory
 # modelname=acoustic
 # modelname=static
-# modelname=syntactic
+modelname=syntactic
 
-echo $modelname $SLURM_ARRAY_TASK_ID
+echo $modelname
 
 for sub in "${subjects[@]}"; do
     echo $sub

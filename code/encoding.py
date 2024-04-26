@@ -72,7 +72,7 @@ def get_regressors(subject: int, modelname: str):
 
     # Build regressors per TR
     audio_emb = []
-    conf_emb = []
+    # conf_emb = []
     regressors = defaultdict(list)
 
     # For each trial, create a feature for each TR
@@ -101,10 +101,10 @@ def get_regressors(subject: int, modelname: str):
         filename = glob(audpath.starstr(["conv", "datatype"]))[0]
         audio_emb.append(np.load(filename))
 
-        confpath = Path(root="features", datatype="motion", ext=".npy")
-        modtrial = ((trial - 1) % 4) + 1
-        confpath.update(sub=f"{subject:03d}", run=run, trial=modtrial)
-        conf_emb.append(np.load(confpath))
+        # confpath = Path(root="features", datatype="motion", ext=".npy")
+        # modtrial = ((trial - 1) % 4) + 1
+        # confpath.update(sub=f"{subject:03d}", run=run, trial=modtrial)
+        # conf_emb.append(np.load(confpath))
 
         # Go through one TR at a time and find words that fall within this TR
         # average their embeddings, get num of words, etc
@@ -179,14 +179,14 @@ def get_regressors(subject: int, modelname: str):
     regressors["prod_spectral_emb"] = prod_audemb
     regressors["comp_spectral_emb"] = comp_audemb
 
-    # split motion embeddings
-    conf_emb = np.vstack(conf_emb)
-    prod_confemb = np.zeros_like(conf_emb)
-    comp_confemb = np.zeros_like(conf_emb)
-    prod_confemb[pmask] = conf_emb[pmask]
-    comp_confemb[~pmask] = conf_emb[~pmask]
-    regressors["prod_motion_emb"] = prod_confemb
-    regressors["comp_motion_emb"] = comp_confemb
+    # # split motion embeddings
+    # conf_emb = np.vstack(conf_emb)
+    # prod_confemb = np.zeros_like(conf_emb)
+    # comp_confemb = np.zeros_like(conf_emb)
+    # prod_confemb[pmask] = conf_emb[pmask]
+    # comp_confemb[~pmask] = conf_emb[~pmask]
+    # regressors["prod_motion_emb"] = prod_confemb
+    # regressors["comp_motion_emb"] = comp_confemb
 
     return regressors
 
@@ -375,15 +375,16 @@ def main(args):
     feature_names = list(features.keys())
     slices = list(features.values())
 
-    # # remove any uninformative dimensions for syntactic only
-    # missingMask = X.sum(0) > 0
-    # if not np.all(missingMask):
-    #     # print("WARNING: contains features with all 0s")
-    #     n1 = (~missingMask[slices[1]]).sum()
-    #     n2 = (~missingMask[slices[2]]).sum()
-    #     X = X[:, missingMask]
-    #     slices[1] = slice(slices[1].start, slices[1].stop - n1)
-    #     slices[2] = slice(slices[2].start - n1, slices[2].stop - n1 - n2)
+    # remove any uninformative dimensions for syntactic only
+    if modelname == "syntactic":
+        missingMask = X.sum(0) > 0
+        if not np.all(missingMask):
+            # print("WARNING: contains features with all 0s")
+            n1 = (~missingMask[slices[1]]).sum()
+            n2 = (~missingMask[slices[2]]).sum()
+            X = X[:, missingMask]
+            slices[1] = slice(slices[1].start, slices[1].stop - n1)
+            slices[2] = slice(slices[2].start - n1, slices[2].stop - n1 - n2)
 
     delayer = SplitDelayer(delays=[2, 3, 4, 5])
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
@@ -402,7 +403,7 @@ def main(args):
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
         print(datetime.now(), f"F{k+1}", X_train.shape, Y_train.shape)
 
-        # pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
+        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
         pipeline.fit(X_train, Y_train)
 
         Y_preds = pipeline.predict(X_test, split=True)

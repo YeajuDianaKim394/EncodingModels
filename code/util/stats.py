@@ -1,4 +1,32 @@
 import numpy as np
+from scipy import stats
+from statsmodels.stats.multitest import multipletests
+from util.atlas import get_brainmask
+
+
+def ttest_1samp(
+    values: np.ndarray,
+    popmean: int = 0,
+    correlations: bool = True,
+    alternative: str = "two-sided",
+    alpha: float = 0.01,
+    method="bonf",
+):
+    if correlations:
+        values = np.arctanh(values)
+
+    fgmask = get_brainmask()
+
+    ttest = stats.ttest_1samp(values, popmean=popmean, alternative=alternative)
+
+    pvalues = ttest.pvalue
+    multiple = multipletests(pvalues[fgmask], alpha=alpha, method=method)
+
+    reject = np.zeros_like(pvalues, dtype=bool)
+    reject[*fgmask.nonzero()] = multiple[0]
+
+    return reject
+
 
 def calculate_pvalues(
     observed: np.ndarray,

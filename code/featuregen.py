@@ -176,7 +176,7 @@ def syntactic(args):
     from sklearn.preprocessing import LabelBinarizer
 
     nlp = spacy.load(
-        "en_core_web_sm", exclude=["toke2vec", "attribute_ruler", "lemmatizer", "ner"]
+        "en_core_web_lg", exclude=["tok2vec", "attribute_ruler", "lemmatizer", "ner"]
     )
 
     taggerEncoder = LabelBinarizer().fit(nlp.get_pipe("tagger").labels)
@@ -222,7 +222,6 @@ def syntactic(args):
             features, columns=["token", "pos", "dep", "stop"], index=df.index
         )
         df = pd.concat([df, df2], axis=1)
-        breakpoint()
 
         # TODO drop punctuation rows?
 
@@ -242,6 +241,120 @@ def syntactic(args):
         df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)
 
         transpath.update(root="features", datatype="syntactic", ext=".pkl")
+        transpath.mkdirs()
+        df.to_pickle(transpath)
+
+
+def spacy_vectors(args):
+    import spacy
+
+    nlp = spacy.load("en_core_web_lg", exclude=["attribute_ruler", "lemmatizer", "ner"])
+
+    # Look for transcripts
+    transpath = Path(
+        root="stimuli", datatype="transcript", suffix="aligned", ext=".csv"
+    )
+    transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
+    search_str = transpath.starstr(["conv", "datatype"])
+    files = glob(search_str)
+    assert len(files), "No files found for: " + search_str
+
+    # Process transcripts
+    for filename in tqdm(files):
+        transpath = Path.frompath(filename)
+        transpath.update(root="stimuli", datatype="transcript")
+
+        df = pd.read_csv(transpath)
+
+        df.insert(0, "word_idx", df.index.values)
+        df["word_with_ws"] = df.word.astype(str) + " "
+        try:
+            df["hftoken"] = df.word_with_ws.apply(nlp.tokenizer)
+        except TypeError:
+            print("typeerror!")
+            breakpoint()
+        df = df.explode("hftoken", ignore_index=True)
+
+        features = []
+
+        for _, sentence in df.groupby(["speaker", "sentence"]):
+            # create a doc from the pre-tokenized text then parse it for features
+            words = [token.text for token in sentence.hftoken.tolist()]
+            spaces = [token.whitespace_ for token in sentence.hftoken.tolist()]
+            doc = spacy.tokens.Doc(nlp.vocab, words=words, spaces=spaces)
+            doc = nlp(doc)
+            for token in doc:
+                features.append(token.vector)
+
+        df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)  # not serializable
+        df["embedding"] = features
+
+        transpath.update(root="features", datatype="en_core_web_lg", ext=".pkl")
+        transpath.mkdirs()
+        df.to_pickle(transpath)
+
+
+def wordnet(args):
+    """
+    https://github.com/nlx-group/WordNetEmbeddings?tab=readme-ov-file
+
+    Saedi, Chakaveh, António Branco, João António Rodrigues and João Ricardo
+    Silva, 2018, "WordNet Embeddings", In Proceedings, 3rd Workshop on
+    Representation Learning for Natural Language Processing (RepL4NLP), 56th
+    Annual Meeting of the Association for Computational Linguistics, 15-20 July
+    2018, Melbourne, Australia.
+    """
+
+    import string
+
+    from nltk.stem import WordNetLemmatizer
+    from nltk.stem.porter import PorterStemmer
+
+    wnl = WordNetLemmatizer()
+    port = PorterStemmer()
+
+    # Load wordnet embeddings
+    emb_dict = {}
+    with open("mats/wn2vec.txt", "r") as f:
+        first_line = f.readline()
+        total, _ = first_line.split()
+
+        for line in tqdm(f, total=int(total)):
+            word, vecstr = line.strip().split(maxsplit=1)
+            vector = np.fromstring(vecstr, dtype=float, sep=" ")
+            emb_dict[word] = vector
+
+    # Look for transcripts
+    transpath = Path(
+        root="stimuli", datatype="transcript", suffix="aligned", ext=".csv"
+    )
+    transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
+    search_str = transpath.starstr(["conv", "datatype"])
+    files = glob(search_str)
+    assert len(files), "No files found for: " + search_str
+
+    def find_wordnet_vec(word: str):
+        word = word.strip(string.punctuation).lower()
+
+        lemma = wnl.lemmatize(word)
+        vector = emb_dict.get(lemma)
+        if vector is None:
+            stem = port.stem(word)
+            vector = emb_dict.get(stem)
+
+        return vector
+
+    # Process transcripts
+    for filename in tqdm(files):
+        transpath = Path.frompath(filename)
+        transpath.update(root="stimuli", datatype="transcript")
+
+        df = pd.read_csv(transpath)
+        df.insert(0, "word_idx", df.index.values)
+        embeddings = df.word.apply(find_wordnet_vec)
+        df["embedding"] = embeddings.tolist()
+
+        transpath.update(root="features", datatype="wordnet", ext=".pkl")
         transpath.mkdirs()
         df.to_pickle(transpath)
 
@@ -370,8 +483,12 @@ if __name__ == "__main__":
         phonemes(args)
     elif args.feature == "confounds":
         confounds(args)
+    elif args.feature == "wordnet":
+        wordnet(args)
     elif args.feature == "syntactic":
         syntactic(args)
+    elif args.feature == "spacy":
+        spacy_vectors(args)
     elif args.feature == "cache":
         cache(args)
     else:

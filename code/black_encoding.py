@@ -171,7 +171,7 @@ def get_syntactic_features():
     from sklearn.preprocessing import LabelBinarizer
 
     nlp = spacy.load(
-        "en_core_web_sm", exclude=["toke2vec", "attribute_ruler", "lemmatizer", "ner"]
+        "en_core_web_lg", exclude=["toke2vec", "attribute_ruler", "lemmatizer", "ner"]
     )
 
     taggerEncoder = LabelBinarizer().fit(nlp.get_pipe("tagger").labels)
@@ -243,37 +243,13 @@ def get_syntactic_features():
     return embeddings
 
 
-def get_lexical_embs():
-    df = pd.read_pickle("mats/black_model-gpt2-xl_layer-36.pkl")
-    df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
-
-    n_features = df.iloc[0].embedding.size
-
-    # Loop through TRs
-    embeddings = np.zeros((TRS, n_features), dtype=np.float32)
-    for tr in range(TRS):
-        subdf = df[df.TR == tr]
-        if len(subdf):
-            embeddings[tr] = subdf.embedding.mean(0)
-
-    return embeddings
-
-
 def get_llm_embs(modelname: str, layer=0):
     import h5py
-    from transformers import AutoTokenizer
 
-    hfmodelname = HFMODELS[modelname]
-
-    df = pd.read_csv("mats/black_transcript.csv")
-    df["TR"] = df.onset.divide(TR).apply(np.floor).apply(int)
-
-    # Tokenize input
-    tokenizer = AutoTokenizer.from_pretrained(hfmodelname)
-    df.insert(0, "word_idx", df.index.values)
-    df["hftoken"] = df.word.apply(tokenizer.tokenize)
-    df = df.explode("hftoken", ignore_index=True)
-    df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
+    df = pd.read_csv(f"features/black/{modelname}/transcript.csv")
+    df["onset"] = df["start"]
+    df.ffill(inplace=True)
+    df["TR"] = df["onset"].divide(TR).apply(np.floor).apply(int)
 
     with h5py.File(f"features/black/{modelname}/states.hdf5", "r") as f:
         states = f[f"layer{layer}"][1:, :]  # (seq_len, dim) - skip first embedding (n)
@@ -300,31 +276,34 @@ def extract_llm_embs(modelname: str, device: str = "cpu"):
         model = AutoModelForCausalLM.from_pretrained(modelname, token=token)
 
     to extract:
-        salloc --time=00:10:00 --gres=gpu:1 --mem=32G
-        python code/black_encoding.py -m mistral-7b
+        salloc --time=00:30:00 --gres=gpu:1 --mem=32G
+        python code/black_encoding.py -m olmo-7b
     """
     import h5py
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    hfmodelname = HFMODELS[modelname]
+    hfmodelname = HFMODELS.get(modelname, modelname)
 
     if torch.cuda.is_available():
         device = torch.device("cuda", 0)
 
-    df = pd.read_csv("mats/black_transcript.csv")
+    with open("stimuli/black_audio.json", "r") as f:
+        d = json.load(f)
+        df = pd.DataFrame(d["word_segments"])
 
     # Tokenize input
-    tokenizer = AutoTokenizer.from_pretrained(hfmodelname)
+    tokenizer = AutoTokenizer.from_pretrained(hfmodelname, trust_remote_code=True)
     df.insert(0, "word_idx", df.index.values)
-    df["hftoken"] = df.word.apply(tokenizer.tokenize)
+    df["hftoken"] = df.word.apply(lambda x: tokenizer.tokenize(" " + x))
     df = df.explode("hftoken", ignore_index=True)
     df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
 
-    tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
+    # tokenids = [tokenizer.bos_token_id] + df.token_id.tolist()
+    tokenids = [tokenizer.pad_token_id] + df.token_id.tolist()
     batch = torch.tensor([tokenids], dtype=torch.long, device=device)
 
-    model = AutoModelForCausalLM.from_pretrained(hfmodelname)
+    model = AutoModelForCausalLM.from_pretrained(hfmodelname, trust_remote_code=True)
     model = model.eval()
     model = model.to(device)
 
@@ -402,32 +381,58 @@ def get_bold(sub: int) -> np.ndarray:
 
 
 def build_regressors(modelname=None, layer=0):
-    # lexical_embs = get_lexical_embs()
-    # lexical_embs = get_llm_embs(modelname=modelname, layer=layer)
-    lexical_embs = get_syntactic_features()
+    
+    reserved_names = ['contextual', 'syntactic', 'articulatory', 'spectral', 'static']
+    hf_name = 'olmo-7b' if modelname in reserved_names else modelname
+
+    lexical_embs = get_llm_embs(modelname=hf_name, layer=layer)
+    syntactic_embs = get_syntactic_features()
     phone_rates, phone_embs = get_phoneme_features()
     word_onsets, word_rates = get_transcript_features()
-    # spectral_features = get_spectral_features()
+    spectral_features = get_spectral_features()
 
-    X = np.hstack(
-        (
-            word_onsets.reshape(-1, 1),
-            word_rates.reshape(-1, 1),
-            phone_rates.reshape(-1, 1),
-            # spectral_features,
-            # phone_embs,
-            lexical_embs,
-        )
-    )
+    features = [
+        word_onsets.reshape(-1, 1),
+        word_rates.reshape(-1, 1),
+        phone_rates.reshape(-1, 1),
+    ]
+
+    dim_nuisance = 3
+    dim_lexical = lexical_embs.shape[1]
+    dim_phonemic = phone_embs.shape[1]
+    dim_spectral = spectral_features.shape[1]
+    dim_syntactic = syntactic_embs.shape[1]
 
     slices = {
-        "task": slice(0, 3),
-        # "spectral": slice(3, 3 + 80),
-        # "phonetic": slice(3 + 80, 3 + 80 + 22),
-        # "lexical": slice(3 + 80 + 22, X.shape[1]),
-        "lexical": slice(3, X.shape[1]),
+        "task": slice(0, dim_nuisance),
     }
 
+    if modelname == "contextual":
+        features.append(lexical_embs)
+        slices["lexical"] = slice(dim_nuisance, dim_lexical)
+    elif modelname == "syntactic":
+        features.append(syntactic_embs)
+        slices["syntactic"] = slice(dim_nuisance, dim_syntactic)
+    elif modelname == "articulatory":
+        features.append(phone_embs)
+        slices["articulatory"] = slice(dim_nuisance, dim_phonemic)
+    elif modelname == "spectral":
+        features.append(spectral_features)
+        slices["spectral"] = slice(dim_nuisance, dim_spectral)
+    else:
+        features.append(spectral_features)
+        features.append(phone_embs)
+        features.append(lexical_embs)
+
+        slices["spectral"] = slice(dim_nuisance, dim_nuisance + dim_spectral)
+        slices["phonetic"] = slice(
+            slices["spectral"].end, slices["spectral"].end + dim_phonemic
+        )
+        slices["lexical"] = slice(
+            slices["phonetic"].end, slices["phonetic"].end + dim_lexical
+        )
+
+    X = np.hstack(features)
     return X, slices
 
 
@@ -472,6 +477,7 @@ def main(args):
     X, features = build_regressors(modelname=args.model, layer=layer)
     feature_names = list(features.keys())
     slices = list(features.values())
+    print(feature_names, slices, X.shape)
 
     pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
 
@@ -491,7 +497,6 @@ def main(args):
         ext="hdf5",
     )
 
-    bolds = []
     for sub in tqdm(subs):
         # get BOLD data
         cache_path.update(sub=f"{sub:03d}")
@@ -502,17 +507,10 @@ def main(args):
             Y_bold = get_bold(sub)
             with h5py.File(cache_path, "w") as f:
                 f.create_dataset(name="bold", data=Y_bold)
-        bolds.append(Y_bold)
-    
-    Y_bold = np.stack(bolds).mean(0)
-    print(Y_bold.shape, len(bolds))
 
-    # NOTE group
-    for sub in [0]:
-        K = 2
         results = defaultdict(list)
-        kfold = KFold(n_splits=K)
-        for train_index, test_index in tqdm(kfold.split(X), leave=False, total=K):
+        kfold = KFold(n_splits=2)
+        for train_index, test_index in kfold.split(X):
             X_train, X_test = X[train_index], X[test_index]
             Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
 
@@ -529,7 +527,7 @@ def main(args):
 
         # save
         pklpath = Path(
-            root="encoding/black",
+            root="encoding_black",
             sub=f"{sub:03d}",
             datatype=f"model-{args.model}_layer-{layer}",
             ext=".hdf5",
