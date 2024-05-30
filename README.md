@@ -63,17 +63,14 @@ Behavrioal data is in `sourcedata/Conv_scan/data`:
 We have transcripts and audio at the trial level. Each transcript contains utterances per speaker turn and the utterance onset.
 
 1. `split_audio_clips.py` splits one long audio file into per run/trial files in `stimuli/audio`
-1. `copy_transcripts.py` copies and normalizes raw transcripts into `stimuli/transcript`
-1. `copy_timings.py` copies and normalizes raw transcripts into `stimuli/timing`
-1. `fix_transcripts.sh` fix transcription problems
 
-1. `wordalign.py` uses whisperx wav2vec implementation to force-align
+if using rev transcripts:
 
-1. `process_transcripts.py` pipeline to normalize, sentencize, and tokenize transcripts and prepare for alignment
-1. `align_transcript.sh` run forced-alignment to get word-level onset/offsets
-1. `merge_transcripts.py` merge our utterance-level transcripts with forced aligner word-level
-
-1. `qa.ipynb` for QA along the way
+2. `copy_timings.py` copies and normalizes raw transcripts into `stimuli/timing`
+3. `copy_transcripts.py` copies and normalizes raw transcripts into `stimuli/transcript`
+4. `fix_transcripts.sh` fix transcription problems
+5. `wordalign.py` uses whisperx wav2vec implementation to force-align
+6. `qa.ipynb` for QA along the way
 
 #### useful commands
 

@@ -36,6 +36,11 @@ EXCLUDED_CONVS = (
     171,  # missing runs due to malfunction. aborted scan
 )
 
+# These conversations had interruptions midway through or had to be restarted
+# `ls -1 sourcedata/CONV_scan/data/TimingsLog | cut -d_ -f2 | uniq -c | sort -nr``
+# 103, 104, 108, 111, 116, 117, 121, 122, 127, 129, 138, 143, 154, 164, 167
+INTERRUPTED_CONVS = (104, 108, 111, 116, 117, 122, 129, 138, 143)  # strangers
+
 CONVS_STRANGERS = (
     104,
     105,

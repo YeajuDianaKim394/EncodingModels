@@ -14,17 +14,39 @@ from util.path import Path
 def main():
     timingdir = "sourcedata/CONV_scan/data/TimingsLog"
 
+    exceptions = [143]
+
     for conv in CONVS:
+        if conv != 143:
+            continue
+        print(conv)
         # get the latest timing log
         files = sorted(glob(path.join(timingdir, f"CONV_{conv:03d}_TimingsLog*.csv")))
         if not len(files):
             print(f"[ERROR] no TimingLog exists for conversation {conv:03d}")
             continue
 
-        dfs = []
-        for filename in files:
-            dfs.append(pd.read_csv(filename))
-        df = pd.concat(dfs).reset_index(drop=True)
+        filename = files[0]
+        if len(files) > 1:
+            if conv in exceptions:
+                # load first, remove last run, and cat second file
+                if len(files) > 2:
+                    print("what do now?")
+
+                dfs = []
+                for j, filename in enumerate(files):
+                    df = pd.read_csv(filename)
+                    if j < len(files) - 1:
+                        # remove last run
+                        df = df[df.run != df.run.max()]
+                    dfs.append(df)
+                df = pd.concat(dfs).reset_index(drop=True)
+            else:
+                filename = files[-1]  # take latest
+                df = pd.read_csv(filename)
+                print("Choosing latest file from multiple", filename)
+        else:
+            df = pd.read_csv(files[0])
 
         newfile = Path(root="stimuli", datatype="timing", suffix="events", ext=".csv")
         conv_id = path.basename(files[-1]).split("_")[1]
