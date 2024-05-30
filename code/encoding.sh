@@ -38,20 +38,20 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
     fi
 fi
 
-# modelname=model-gpt2-2b_layer-24
+modelname=model-gpt2-2b_layer-24
 # modelname=en_core_web_lg
 
 # modelname=contextual
 # modelname=articulatory
 # modelname=acoustic
 # modelname=static
-modelname=syntactic
+# modelname=syntactic
 
 echo $modelname
 
 for sub in "${subjects[@]}"; do
     echo $sub
-    python code/encoding.py -s "$sub" -j 1 -m "$modelname" --use-cache --cache-desc trialmot6 --suffix _trialmot6
+    python code/encoding.py -s "$sub" -j 1 -m "$modelname" --use-cache --cache-desc trialmot6 --suffix _trialmot6_wx
 done
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

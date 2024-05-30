@@ -1,8 +1,9 @@
 """Add embeddings to an events file that has words.
 
 ```
-    salloc --mem=32G --time=00:15:00 --gres=gpu:1
+    salloc --mem=32G --time=00:05:00 --gres=gpu:1 --mem=4G
     python code/embeddings.py -m gpt2-2b --layer 24
+
     python code/embeddings.py -m gpt2-2b --layer 0 --force-cpu  # static
     python code/embeddings.py -m olmo-7b --layer 16  # 32 G mem
 ```
@@ -78,9 +79,7 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
     hfmodelname = HFMODELS[modelname]
 
     # Find transcripts
-    transpath = Path(
-        root="stimuli", datatype="transcript", suffix="aligned", conv="*", ext=".csv"
-    )
+    transpath = Path(root="stimuli", datatype="whisperx", conv="*", ext=".csv")
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
     if not len(files):
@@ -169,7 +168,7 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
 
         df["embedding"] = [e for e in states]
         epath = Path.frompath(tpath)
-        epath.update(root="features", datatype=dirname, suffix=None, ext="pkl")
+        epath.update(root="features_wx", datatype=dirname, suffix=None, ext="pkl")
         epath.mkdirs()
         df.to_pickle(epath)
 
@@ -185,8 +184,8 @@ if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", default="glove-50")
-    parser.add_argument("--layer", type=int, default=None)
+    parser.add_argument("-m", "--model", default="gpt2-2b")
+    parser.add_argument("--layer", type=int, default=24)
     parser.add_argument("--cuda", type=int, default=0)
     parser.add_argument("--force-cpu", action="store_true")
     args = parser.parse_args()

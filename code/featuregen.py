@@ -146,9 +146,7 @@ UW,vowel,,,,high,back,,"""
         func = get_word_phone_features
 
     # Look for transcripts
-    transpath = Path(
-        root="stimuli", datatype="transcript", suffix="aligned", ext=".csv"
-    )
+    transpath = Path(root="stimuli", datatype="whisperx", ext=".csv")
     transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
@@ -156,17 +154,17 @@ UW,vowel,,,,high,back,,"""
 
     for filename in tqdm(files):
         transpath = Path.frompath(filename)
-        transpath.update(root="stimuli", datatype="transcript")
+        transpath.update(root="stimuli", datatype="whisperx")
 
         df = pd.read_csv(transpath)
-        phone_emb = df.word.str.strip(PUNCTUATION).apply(func)
+        phone_emb = df.word.astype(str).str.strip(PUNCTUATION).apply(func)
         embeddings = np.vstack(phone_emb.values)
 
         # remove any uninformative dimensions or not
         # embeddings = embeddings[:, embeddings.sum(0) > 0]
         df["embedding"] = embeddings.tolist()
 
-        transpath.update(root="features", datatype=mode, ext=".pkl")
+        transpath.update(root="features_wx", datatype=mode, ext=".pkl")
         transpath.mkdirs()
         df.to_pickle(transpath)
 
@@ -183,9 +181,7 @@ def syntactic(args):
     dependencyEncoder = LabelBinarizer().fit(nlp.get_pipe("parser").labels)
 
     # Look for transcripts
-    transpath = Path(
-        root="stimuli", datatype="transcript", suffix="aligned", ext=".csv"
-    )
+    transpath = Path(root="stimuli", datatype="whisperx", ext=".csv")
     transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
@@ -194,7 +190,7 @@ def syntactic(args):
     # Process transcripts
     for filename in tqdm(files):
         transpath = Path.frompath(filename)
-        transpath.update(root="stimuli", datatype="transcript")
+        transpath.update(root="stimuli", datatype="whisperx")
 
         df = pd.read_csv(transpath)
 
@@ -240,7 +236,7 @@ def syntactic(args):
         # not serializable
         df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)
 
-        transpath.update(root="features", datatype="syntactic", ext=".pkl")
+        transpath.update(root="features_wx", datatype="syntactic", ext=".pkl")
         transpath.mkdirs()
         df.to_pickle(transpath)
 
@@ -406,7 +402,7 @@ def spectral(args):
         chunks = np.split(features, 120, axis=1)  # 150 10-ms chunks (1.5 s)
         features = np.hstack([c.mean(axis=1, keepdims=True) for c in chunks])
 
-        audiopath.update(root="features", datatype="spectrogram", ext="npy")
+        audiopath.update(root="features_wx", datatype="spectrogram", ext="npy")
         audiopath.mkdirs()
         np.save(audiopath, features.T)
 

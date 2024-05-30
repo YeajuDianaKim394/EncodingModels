@@ -14,6 +14,42 @@ from sklearn.linear_model import LinearRegression
 from .path import Path
 
 
+class Subject(object):
+
+    def __init__(self, sid) -> None:
+        self.sid = int(sid)
+
+    def get_conv(self) -> str:
+        return str(self.sid + 100 if self.sid < 100 else self.sid)
+
+    def get_partner(self) -> int:
+        return self.sid + 100 if self.sid < 100 else self.sid - 100
+
+    def recode_trial(self, trial: int) -> int:
+        return ((int(trial) - 1) % 4) + 1
+
+    def get_timing(self, condition="G", runs=RUNS) -> pd.DataFrame:
+        timingpath = Path(
+            root="stimuli",
+            conv=self.get_conv(),
+            datatype="timing",
+            run=0,
+            suffix="events",
+            ext=".csv",
+        )
+        dfs = []
+        for run in runs:
+            timingpath = timingpath.update(run=run)
+            dft = pd.read_csv(timingpath)
+            dfs.append(dft)
+        dft = pd.concat(dfs).reset_index(drop=True)
+        dft = dft[["run", "trial", "condition", "role", "comm.time"]]
+        dft = dft[dft.condition == condition]
+        dft.dropna(subset=["comm.time"], inplace=True)
+
+        return dft
+
+
 def get_conv(subject: int) -> str:
     return str(subject + 100 if subject < 100 else subject)
 
@@ -318,7 +354,7 @@ def get_transcript(
         conv = get_conv(subject)
 
     embpath = Path(
-        root="features",
+        root="features_wx",
         conv=conv,
         datatype=modelname,
         ext=".pkl",

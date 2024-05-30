@@ -96,10 +96,11 @@ def get_regressors(subject: int, modelname: str):
         is_prod_pho = subdf_phones.speaker == subject
         is_comp_pho = subdf_phones.speaker != subject
 
-        audpath = Path(root="features", datatype="spectrogram", ext=".npy")
+        audpath = Path(root="features_wx", datatype="spectrogram", ext=".npy")
         audpath.update(conv=conv, run=run, trial=trial)
         filename = glob(audpath.starstr(["conv", "datatype"]))[0]
         audio_emb.append(np.load(filename))
+        print(audio_emb[-1].shape, audpath)
 
         # confpath = Path(root="features", datatype="motion", ext=".npy")
         # modtrial = ((trial - 1) % 4) + 1
@@ -170,6 +171,7 @@ def get_regressors(subject: int, modelname: str):
     regressors["comp_screen"] = 1 - switches.reshape(-1, 1)
 
     # split spectral embeddings
+    breakpoint()
     pmask = switches.flatten().astype(bool)
     audio_emb = np.vstack(audio_emb)
     prod_audemb = np.zeros_like(audio_emb)
@@ -455,9 +457,7 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("-s", "--subject", type=int)
-    parser.add_argument(
-        "-m", "--model", type=str, default="model-gpt2-medium_layer-0.75"
-    )
+    parser.add_argument("-m", "--model", type=str, default="model-gpt2-2b_layer-24")
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--cuda", type=int, default=1)
     parser.add_argument("--suffix", type=str, default="")

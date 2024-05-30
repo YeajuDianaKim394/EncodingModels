@@ -9,6 +9,8 @@ import pandas as pd
 from tqdm import tqdm
 from util.path import Path
 
+# from util.subject import Subject
+
 if __name__ == "__main__":
     files = os.listdir("stimuli/whisperx")
 
@@ -20,6 +22,13 @@ if __name__ == "__main__":
 
         path = Path.frompath(filename)
         path.update(root="stimuli", conv=path["conv"], datatype="whisperx", ext="csv")
+
+        # # NOTE - try to use timing info
+        # subject = Subject(path["conv"])
+        # df2 = subject.get_timing(runs=[path["run"]])
+        # trial_id = subject.recode_trial(path["trial"])
+        # df2 = df2[df2.trial == trial_id]
+        # breakpoint()
 
         # restructure speaker column
         subB = int(path["conv"])
