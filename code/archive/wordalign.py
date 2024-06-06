@@ -1,4 +1,4 @@
-"""
+"""forced-alignment of existing transcripts with whisperx
 
 conv-103_run-1_set-1_trial-2_item-2_condition-G_first-B_utterance.csv            
 Failed to align segment ("Um, uh I'd want to be famous for something, I like to think that would be pretty cool, if I could just like, for that."): backtrack failed, resorting to original...
@@ -29,6 +29,7 @@ Error at  conv-172_run-3_set-2_trial-10_item-10_condition-G_first-A_utterance.cs
 object of type 'float' has no len()
 
 """
+
 from glob import glob
 
 import pandas as pd
