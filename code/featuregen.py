@@ -8,10 +8,8 @@ import numpy as np
 import pandas as pd
 from constants import (
     ARPABET_PHONES,
-    CONFOUND_REGRESSORS,
     CONVS_FRIENDS,
     CONVS_STRANGERS,
-    EXTRA_MOTION_CONFOUNDS,
     FNKEYS,
     MOTION_CONFOUNDS,
     PUNCTUATION,
@@ -146,7 +144,7 @@ UW,vowel,,,,high,back,,"""
         func = get_word_phone_features
 
     # Look for transcripts
-    transpath = Path(root="stimuli", datatype="whisperx", ext=".csv")
+    transpath = Path(root="data/stimuli", datatype="whisperx", ext=".csv")
     transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
@@ -154,7 +152,7 @@ UW,vowel,,,,high,back,,"""
 
     for filename in tqdm(files):
         transpath = Path.frompath(filename)
-        transpath.update(root="stimuli", datatype="whisperx")
+        transpath.update(root="data/stimuli", datatype="whisperx")
 
         df = pd.read_csv(transpath)
         phone_emb = df.word.astype(str).str.strip(PUNCTUATION).apply(func)
@@ -164,7 +162,7 @@ UW,vowel,,,,high,back,,"""
         # embeddings = embeddings[:, embeddings.sum(0) > 0]
         df["embedding"] = embeddings.tolist()
 
-        transpath.update(root="features_wx", datatype=mode, ext=".pkl")
+        transpath.update(root="data/stimuli", datatype=mode, ext=".pkl")
         transpath.mkdirs()
         df.to_pickle(transpath)
 
@@ -173,15 +171,13 @@ def syntactic(args):
     import spacy
     from sklearn.preprocessing import LabelBinarizer
 
-    nlp = spacy.load(
-        "en_core_web_lg", exclude=["tok2vec", "attribute_ruler", "lemmatizer", "ner"]
-    )
+    nlp = spacy.load("en_core_web_lg")
 
     taggerEncoder = LabelBinarizer().fit(nlp.get_pipe("tagger").labels)
     dependencyEncoder = LabelBinarizer().fit(nlp.get_pipe("parser").labels)
 
     # Look for transcripts
-    transpath = Path(root="stimuli", datatype="whisperx", ext=".csv")
+    transpath = Path(root="data/stimuli", datatype="whisperx", ext=".csv")
     transpath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
@@ -190,9 +186,10 @@ def syntactic(args):
     # Process transcripts
     for filename in tqdm(files):
         transpath = Path.frompath(filename)
-        transpath.update(root="stimuli", datatype="whisperx")
+        transpath.update(root="data/stimuli", datatype="whisperx")
 
         df = pd.read_csv(transpath)
+        df["turn"] = (df.speaker.diff() != 0).cumsum()
 
         df.insert(0, "word_idx", df.index.values)
         df["word_with_ws"] = df.word.astype(str) + " "
@@ -204,39 +201,30 @@ def syntactic(args):
         df = df.explode("hftoken", ignore_index=True)
 
         features = []
-
-        for _, sentence in df.groupby(["speaker", "sentence"]):
+        for _, sentence in df.groupby(["speaker", "turn"]):
             # create a doc from the pre-tokenized text then parse it for features
             words = [token.text for token in sentence.hftoken.tolist()]
-            spaces = [token.whitespace_ for token in sentence.hftoken.tolist()]
+            spaces = [token.whitespace_ == " " for token in sentence.hftoken.tolist()]
             doc = spacy.tokens.Doc(nlp.vocab, words=words, spaces=spaces)
             doc = nlp(doc)
             for token in doc:
                 features.append([token.text, token.tag_, token.dep_, token.is_stop])
-
         df2 = pd.DataFrame(
             features, columns=["token", "pos", "dep", "stop"], index=df.index
         )
         df = pd.concat([df, df2], axis=1)
-
-        # TODO drop punctuation rows?
 
         # generate embeddings
         a = taggerEncoder.transform(df.pos.tolist())
         b = dependencyEncoder.transform(df.dep.tolist())
         c = LabelBinarizer().fit_transform(df.stop.tolist())
         embeddings = np.hstack((a, b, c))
-        # remove any uninformative dimensions or not
-        # if np.any(embeddings.sum(0) == 0):
-        #     print("WARNING: contains features with all 0s")
-        # embeddings = embeddings[:, embeddings.sum(0) > 0]
-
         df["embedding"] = embeddings.tolist()
 
         # not serializable
         df.drop(["hftoken", "word_with_ws"], axis=1, inplace=True)
 
-        transpath.update(root="features_wx", datatype="syntactic", ext=".pkl")
+        transpath.update(root="data/stimuli", datatype="syntactic", ext=".pkl")
         transpath.mkdirs()
         df.to_pickle(transpath)
 
@@ -244,7 +232,7 @@ def syntactic(args):
 def spacy_vectors(args):
     import spacy
 
-    nlp = spacy.load("en_core_web_lg", exclude=["attribute_ruler", "lemmatizer", "ner"])
+    nlp = spacy.load("en_core_web_lg")
 
     # Look for transcripts
     transpath = Path(
@@ -276,7 +264,7 @@ def spacy_vectors(args):
         for _, sentence in df.groupby(["speaker", "sentence"]):
             # create a doc from the pre-tokenized text then parse it for features
             words = [token.text for token in sentence.hftoken.tolist()]
-            spaces = [token.whitespace_ for token in sentence.hftoken.tolist()]
+            spaces = [token.whitespace_ == " " for token in sentence.hftoken.tolist()]
             doc = spacy.tokens.Doc(nlp.vocab, words=words, spaces=spaces)
             doc = nlp(doc)
             for token in doc:
@@ -362,17 +350,8 @@ def spectral(args):
 
     SAMPLING_RATE = 16000.0
 
-    # audiopath = Path(
-    #     root="stimuli",
-    #     sub="000",
-    #     datatype="audio",
-    #     task="Conv",
-    #     run=1,
-    #     ext=".wav",
-    # )
-
     # Look for audio files
-    audiopath = Path(root="stimuli", datatype="audio", ext=".wav")
+    audiopath = Path(root="data/stimuli", datatype="audio", ext=".wav")
     audiopath.update(**{str(k): v for k, v in vars(args).items() if k in FNKEYS})
     search_str = audiopath.starstr(["conv", "datatype"])
     search_str = search_str.replace(".wav", "condition-G*.wav")
@@ -381,18 +360,9 @@ def spectral(args):
 
     feature_extractor = AutoFeatureExtractor.from_pretrained("openai/whisper-tiny")
 
-    # for sub in tqdm(args.subs):
-    #     substr = f"{sub:03d}"
-    #     confpath.update(sub=substr)
-    #     rt_dict = get_trials(sub, condition="G")
-    #     for run in args.runs:
-    #         confpath.update(run=run)
-    #         trials = rt_dict[run]
-    #         for trial in trials:
-
     for filename in tqdm(files):
         audiopath = Path.frompath(filename)
-        audiopath.update(root="stimuli", datatype="audio")
+        audiopath.update(root="data/stimuli", datatype="audio")
 
         audio = load_audio(audiopath)
         chunks = np.array_split(audio, 6)  # six 30-second chunks
@@ -402,54 +372,9 @@ def spectral(args):
         chunks = np.split(features, 120, axis=1)  # 150 10-ms chunks (1.5 s)
         features = np.hstack([c.mean(axis=1, keepdims=True) for c in chunks])
 
-        audiopath.update(root="features_wx", datatype="spectrogram", ext="npy")
+        audiopath.update(datatype="spectrogram", ext="npy")
         audiopath.mkdirs()
         np.save(audiopath, features.T)
-
-
-def cache(args):
-    from util.subject import get_bold
-
-    cache_params = {
-        "nomot": dict(
-            run_confounds=CONFOUND_REGRESSORS, trial_confounds=[], cache_desc="nomot"
-        ),
-        "runmot": dict(
-            run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS,
-            trial_confounds=[],
-            cache_desc="runmot",
-        ),
-        "runmotextra": dict(
-            run_confounds=CONFOUND_REGRESSORS
-            + MOTION_CONFOUNDS
-            + EXTRA_MOTION_CONFOUNDS,
-            trial_confounds=[],
-            cache_desc="runmotextra",
-        ),
-        "trialmot": dict(
-            run_confounds=CONFOUND_REGRESSORS,
-            trial_confounds=MOTION_CONFOUNDS + EXTRA_MOTION_CONFOUNDS,
-            cache_desc="trialmot",
-        ),
-        "trialmot6": dict(
-            run_confounds=CONFOUND_REGRESSORS,
-            trial_confounds=MOTION_CONFOUNDS,
-            cache_desc="trialmot6",
-        ),
-    }
-
-    for desc, params in cache_params.items():
-        if desc != "trialmot":
-            continue  # NOTE
-        print(desc, params)
-        for sub in tqdm(args.subs):
-            _ = get_bold(
-                sub,
-                save_data=True,
-                use_cache=False,
-                return_confounds=["framewise_displacement"],
-                **params,
-            )
 
 
 if __name__ == "__main__":
@@ -475,8 +400,10 @@ if __name__ == "__main__":
 
     if args.feature == "spectral":
         spectral(args)
-    elif args.feature == "phonemes":
-        phonemes(args)
+    elif args.feature == "articulatory":
+        phonemes(args, mode="articulatory")
+    elif args.feature == "phonemic":
+        phonemes(args, mode="phonemic")
     elif args.feature == "confounds":
         confounds(args)
     elif args.feature == "wordnet":
@@ -485,7 +412,5 @@ if __name__ == "__main__":
         syntactic(args)
     elif args.feature == "spacy":
         spacy_vectors(args)
-    elif args.feature == "cache":
-        cache(args)
     else:
         raise ValueError(f"Unknown feature set: {args.feature}")

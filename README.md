@@ -59,10 +59,23 @@ Behavrioal data is in `sourcedata/Conv_scan/data`:
 
 ## code
 
+order:
+1. `split_audio_clips.py`
+  1. `transcribe.sh`
+    1. `move_whisper_transcipts.py`
+      1. `embeddings.py`
+      2. `feature_gen.py` articulatory
+      3. `feature_gen.py` syntactic
+  2. `feature_gen.py` spectral
+2. `clean.py` -m trialmot9 and runmot24 [INFLUENCED]
+3. encoding? [INFLUENCED]
+
 ### transcript preprocessing
 We have transcripts and audio at the trial level. Each transcript contains utterances per speaker turn and the utterance onset.
 
 1. `split_audio_clips.py` splits one long audio file into per run/trial files in `stimuli/audio`
+2. `transcribe.sh`
+3. `move_whisper_transcipts.py`
 
 if using rev transcripts:
 
@@ -71,6 +84,8 @@ if using rev transcripts:
 4. `fix_transcripts.sh` fix transcription problems
 5. `wordalign.py` uses whisperx wav2vec implementation to force-align
 6. `qa.ipynb` for QA along the way
+
+`rsync -av scotty.princeton.edu:/jukebox/hasson/zaid/fmri-convs/data/stimuli data/`
 
 #### useful commands
 

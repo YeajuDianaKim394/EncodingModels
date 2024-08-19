@@ -8,8 +8,8 @@ TRIALS = (1, 2, 3, 4)
 NTRIALS = len(TRIALS)
 NRUNS = len(RUNS)
 
-BLU = "#0173b2"
-ORG = "#de8f05"
+BLU = "#0173b2"  # HSL: (201, 99, 35)
+ORG = "#de8f05"  # HSL: (38, 95, 45)
 
 RUN_TRS = 544
 TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
@@ -150,7 +150,6 @@ EXTRA_MOTION_CONFOUNDS = [
     "rot_x_power2",
     "rot_y_power2",
     "rot_z_power2",
-    "framewise_displacement",
 ]
 
 ARPABET_PHONES = [

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --time=03:30:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=03:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --mem=8G                 # memory per cpu-core (4G is default)
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
@@ -11,9 +11,10 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=zzada@princeton.edu
 
-# check job history for 2 fold, but it takes less time, and 45G mem for gpt2
-# 2:30 with 8G the usual if using cache and not saving weights
-# 3:45 with 45G if using cache and saving weights for opt-7b
+# 2:30 with 8G the usual if not saving weights
+# acoustic/syntactic needs more time for some reason, up to 3hr
+# saving weights requires 16G mem and < 1hr time for 2 folds
+# saving weights requires 32G mem and < 1hr time for flipped train/test
 
 source /usr/share/Modules/init/bash
 module load anaconda3/2023.3 cudatoolkit/11.7 cudnn/cuda-11.x/8.2.0
@@ -39,19 +40,30 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
 fi
 
 modelname=model-gpt2-2b_layer-24
-# modelname=en_core_web_lg
+modelname=model-llama3-8b_layer-16
 
-# modelname=contextual
-# modelname=articulatory
-# modelname=acoustic
-# modelname=static
+space=joint
+# nosplit takes 2:15 with 4G RAM
+# space=joint_nosplit
+# space=contextual
+# space=articulatory
+# space=acoustic
+# space=phonemic
+
+# space=syntactic
 # modelname=syntactic
 
-echo $modelname
+# space=joint_syntactic
+# modelname=syntactic
+
+# space=static
+# modelname=model-gpt2-2b_layer-0
+
+echo $modelname $space
 
 for sub in "${subjects[@]}"; do
     echo $sub
-    python code/encoding.py -s "$sub" -j 1 -m "$modelname" --use-cache --cache-desc trialmot6 --suffix _trialmot6_wx
+    python code/encoding.py -s "$sub" -j 1 -m "$space" --lang-model "$modelname" --cache trialmot9 --suffix _t9llama --save-preds
 done
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

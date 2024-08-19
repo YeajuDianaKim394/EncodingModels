@@ -1,6 +1,7 @@
 """Utilities to make the plotting life easier
 """
 
+import matplotlib as mpl
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import nibabel as nib
@@ -22,6 +23,34 @@ from .atlas import Atlas
 _image_cache = {}
 
 
+def standalone_colorbar(
+    cmap: str,
+    ticks=(0, 1),
+    tick_labels=(0, 1),
+    figsize=(1.5, 1),
+    orientation="h",
+    dpi: int = 300,
+):
+    """Adapted from https://stackoverflow.com/a/62436015"""
+
+    if orientation.startswith("h"):
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        # left, bottom, width, height
+        # fractions of figure width and height
+        ax = fig.add_axes([0.05, 0.80, 0.9, 0.1])
+        cbar = mpl.colorbar.ColorbarBase(ax, orientation="horizontal", cmap=cmap)
+        cbar.ax.set_xticks(ticks)
+        cbar.ax.set_xticklabels(tick_labels)
+    else:
+        fig = plt.figure(figsize=(figsize[1], figsize[0]), dpi=dpi)
+        ax = fig.add_axes([0.05, 0.80, 0.1, 0.9])
+        cbar = mpl.colorbar.ColorbarBase(ax, orientation="vertical", cmap=cmap)
+        cbar.ax.set_yticks(ticks)
+        cbar.ax.set_yticklabels(tick_labels)
+
+    return fig
+
+
 def upsample_fsaverage(values: np.ndarray, method: str = "linear") -> np.ndarray:
     dataL = values[:40962]
     dataR = values[40962:]
@@ -40,8 +69,9 @@ def get_surfplot(
     brightness: float = 0.7,
     sulc_alpha: float = 0.5,
     add_sulc: bool = False,
-    surf_lh_fn: str = "mats/suma-fsaverage6/lh.inf_120.gii",
-    surf_rh_fn: str = "mats/suma-fsaverage6/rh.inf_120.gii",
+    surf_lh_fn: str = "mats/suma-fsaverage6/lh.inf_{}.gii",
+    surf_rh_fn: str = "mats/suma-fsaverage6/rh.inf_{}.gii",
+    inflation: int = 100,
     **kwargs,
 ) -> Plot:
     """Get a basic Plot to add layers to."""
@@ -50,6 +80,9 @@ def get_surfplot(
     surfaces = fetch_func(data_dir="mats", density=density)
     if surf_lh_fn is None or surf_rh_fn is None:
         surf_lh_fn, surf_rh_fn = surfaces["inflated"]
+    else:
+        surf_lh_fn = surf_lh_fn.format(inflation)
+        surf_rh_fn = surf_rh_fn.format(inflation)
     sulc_lh_fn, sulc_rh_fn = surfaces["sulc"]
 
     if surf_lh_fn not in _image_cache:
@@ -162,7 +195,7 @@ def surface_plot(
         ax.axis("off")
 
         if cbar:
-            p._add_colorbars(fig=fig, ax=ax)
+            p._add_colorbars(fig=fig, ax=ax, n_ticks=2)
 
         if title is not None:
             ax.set_title(title)

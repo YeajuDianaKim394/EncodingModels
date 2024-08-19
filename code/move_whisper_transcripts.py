@@ -9,26 +9,19 @@ import pandas as pd
 from tqdm import tqdm
 from util.path import Path
 
-# from util.subject import Subject
-
 if __name__ == "__main__":
-    files = os.listdir("stimuli/whisperx")
+    files = os.listdir("data/stimuli/whisperx")
 
     for filename in tqdm(files):
-        with open(os.path.join("stimuli", "whisperx", filename), "r") as f:
+        with open(os.path.join("data", "stimuli", "whisperx", filename), "r") as f:
             d = json.load(f)
             df = pd.DataFrame(d["word_segments"])
             df.speaker.bfill(inplace=True)  # sometimes can be NaN for some reason
 
         path = Path.frompath(filename)
-        path.update(root="stimuli", conv=path["conv"], datatype="whisperx", ext="csv")
-
-        # # NOTE - try to use timing info
-        # subject = Subject(path["conv"])
-        # df2 = subject.get_timing(runs=[path["run"]])
-        # trial_id = subject.recode_trial(path["trial"])
-        # df2 = df2[df2.trial == trial_id]
-        # breakpoint()
+        path.update(
+            root="data/stimuli", conv=path["conv"], datatype="whisperx", ext="csv"
+        )
 
         # restructure speaker column
         subB = int(path["conv"])
@@ -38,8 +31,6 @@ if __name__ == "__main__":
         if path["first"] == "A":
             first_speaker_id = subA
             second_speaker_id = subB
-
-        # breakpoint()
 
         first_speaker = df.speaker.iloc[0]
         df["speaker"] = df["speaker"].apply(

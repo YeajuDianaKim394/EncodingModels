@@ -1,12 +1,10 @@
 """Add embeddings to an events file that has words.
 
-```
-    salloc --mem=32G --time=00:05:00 --gres=gpu:1 --mem=4G
-    python code/embeddings.py -m gpt2-2b --layer 24
+sbatch --job-name=emb --mem=8G --time=00:05:00 --gres=gpu:1 code/slurm.sh -- code/embeddings.py -m gpt2-2b --layer 24
+sbatch --job-name=emb --mem=36G --time=00:05:00 --gres=gpu:1 --constraint=gpu80 code/slurm.sh -- code/embeddings.py -m gemma2-9b --layer 22
 
-    python code/embeddings.py -m gpt2-2b --layer 0 --force-cpu  # static
-    python code/embeddings.py -m olmo-7b --layer 16  # 32 G mem
-```
+python code/embeddings.py -m gpt2-2b --layer 0
+
 """
 
 from glob import glob
@@ -46,6 +44,8 @@ HFMODELS = {
     "gpt2-355m": "gpt2-medium",
     "gpt2-774m": "gpt2-large",
     "gpt2-2b": "gpt2-xl",
+    "gemma2-9b": "google/gemma-2-9b",
+    "llama3-8b": "meta-llama/Meta-Llama-3-8B",
 }
 
 
@@ -79,7 +79,7 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
     hfmodelname = HFMODELS[modelname]
 
     # Find transcripts
-    transpath = Path(root="stimuli", datatype="whisperx", conv="*", ext=".csv")
+    transpath = Path(root="data/stimuli", datatype="whisperx", conv="*", ext=".csv")
     search_str = transpath.starstr(["conv", "datatype"])
     files = glob(search_str)
     if not len(files):
@@ -118,7 +118,7 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
     )
     model = model.eval()
     model = model.to(device)
-    # staticEmbeddingTable = model.lm_head.weight
+    staticEmbeddingTable = model.lm_head.weight
 
     metrics = {}
     dirname = f"model-{modelname}_layer-{layer}"
@@ -129,7 +129,9 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
 
         # Tokenize input
         df.insert(0, "word_idx", df.index.values)
-        df["hftoken"] = df.word.apply(tokenizer.tokenize)
+        # df["hftoken"] = df.word.apply(tokenizer.tokenize)
+        # manually add space:
+        df["hftoken"] = df.word.apply(lambda x: tokenizer.tokenize(" " + x))
         df = df.explode("hftoken", ignore_index=True)
         df["token_id"] = df.hftoken.apply(tokenizer.convert_tokens_to_ids)
 
@@ -139,40 +141,41 @@ def main(modelname: str, device: str = "cpu", layer: int = None):
         batch = torch.tensor([tokenids], dtype=torch.long, device=device)
 
         # Static embedding lookup
-        # with torch.no_grad():
-        #     states = staticEmbeddingTable[batch][0, 1:].numpy(force=True)
+        if layer == 0:
+            with torch.no_grad():
+                states = staticEmbeddingTable[batch][0, 1:].numpy(force=True)
+        else:
+            # Run through model
+            with torch.no_grad():
+                output = model(batch, labels=batch, output_hidden_states=True)
+                states = output.hidden_states[layer][0, 1:].numpy(force=True)
 
-        # Run through model
-        with torch.no_grad():
-            output = model(batch, labels=batch, output_hidden_states=True)
-            states = output.hidden_states[layer][0, 1:].numpy(force=True)
+                loss = output.loss
+                logits = output.logits[0]
 
-            loss = output.loss
-            logits = output.logits[0]
+                logits_order = logits.argsort(descending=True, dim=-1)
+                ranks = torch.eq(logits_order[:-1], batch[:, 1:].T).nonzero()[:, 1]
 
-            logits_order = logits.argsort(descending=True, dim=-1)
-            ranks = torch.eq(logits_order[:-1], batch[:, 1:].T).nonzero()[:, 1]
+                probs = logits[:-1, :].softmax(-1)
+                true_probs = probs[0, batch[0, 1:]]
 
-            probs = logits[:-1, :].softmax(-1)
-            true_probs = probs[0, batch[0, 1:]]
+                entropy = torch.distributions.Categorical(probs=probs).entropy()
 
-            entropy = torch.distributions.Categorical(probs=probs).entropy()
+            df["rank"] = ranks.numpy(force=True)
+            df["true_prob"] = true_probs.numpy(force=True)
+            df["entropy"] = entropy.numpy(force=True)
 
-        df["rank"] = ranks.numpy(force=True)
-        df["true_prob"] = true_probs.numpy(force=True)
-        df["entropy"] = entropy.numpy(force=True)
-
-        metrics[tpath] = dict(
-            top1_acc=(df["rank"] == 0).mean(), perplexity=loss.exp().item()
-        )
+            metrics[tpath] = dict(
+                top1_acc=(df["rank"] == 0).mean(), perplexity=loss.exp().item()
+            )
 
         df["embedding"] = [e for e in states]
         epath = Path.frompath(tpath)
-        epath.update(root="features_wx", datatype=dirname, suffix=None, ext="pkl")
+        epath.update(root="data/stimuli", datatype=dirname, suffix=None, ext="pkl")
         epath.mkdirs()
         df.to_pickle(epath)
 
-    outdir = f"features/conv/{modelname}"
+    outdir = f"results/{modelname}"
     makedirs(outdir, exist_ok=True)
     summary_df = pd.DataFrame(metrics).T
     summary_df.to_csv(f"{outdir}/performance.csv")
