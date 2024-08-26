@@ -10,6 +10,7 @@ NRUNS = len(RUNS)
 
 BLU = "#0173b2"  # HSL: (201, 99, 35)
 ORG = "#de8f05"  # HSL: (38, 95, 45)
+# from: print(sns.color_palette('colorblind').as_hex())
 
 RUN_TRS = 544
 TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
