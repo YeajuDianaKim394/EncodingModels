@@ -1,3 +1,4 @@
+import json
 from glob import glob
 
 import h5py
@@ -5,8 +6,6 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 from constants import RUN_TRIAL_SLICE, RUNS, TR
-from nilearn import signal
-from sklearn.base import BaseEstimator, TransformerMixin
 
 from .path import Path
 
@@ -109,6 +108,7 @@ def get_confounds(
     runs: list[int] = RUNS,
     confounds: list[str] = ["framewise_displacement"],
     trial_level: bool = True,
+    n_a_comp_cor: int = 5,
 ):
     confound_path = Path(
         root="data/derivatives/fmriprep",
@@ -128,6 +128,39 @@ def get_confounds(
     dfs = []
     for run in runs:
         confound_path.update(run=run)
+
+        if "a_comp_cor" in confounds:
+            confounds = confounds.copy()
+
+            confound_path.update(ext=".json")
+            with open(confound_path, "r") as f:
+                confounds_meta = json.load(f)
+
+            confound_path.update(ext=".tsv")
+            conf_df = pd.read_csv(confound_path, sep="\t", nrows=1)
+            available_confounds = conf_df.columns.tolist()
+
+            conf_meta = pd.DataFrame(confounds_meta).T
+            conf_meta.dropna(inplace=True)
+            conf_meta = conf_meta[conf_meta["Retained"]]
+            conf_meta = conf_meta[conf_meta["Method"] == "aCompCor"]
+            conf_meta.sort_values(
+                ["Mask", "VarianceExplained"], ascending=False, inplace=True
+            )
+
+            top_csf = conf_meta[conf_meta["Mask"] == "CSF"].index.tolist()
+            top_wm = conf_meta[conf_meta["Mask"] == "WM"].index.tolist()
+            top_csf = top_csf[:n_a_comp_cor]
+            top_wm = top_wm[:n_a_comp_cor]
+
+            assert np.in1d(top_csf, available_confounds).all()
+            assert np.in1d(top_wm, available_confounds).all()
+
+            confounds.extend(top_csf)
+            confounds.extend(top_wm)
+            confounds.pop(confounds.index("a_comp_cor"))
+
+        confound_path.update(ext=".tsv")
         conf_df = pd.read_csv(confound_path, sep="\t", usecols=confounds)
         conf_df.fillna(value=0, inplace=True)
 
