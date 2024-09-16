@@ -1,6 +1,8 @@
 """Confound regression at run and trial level.
 
 for model in phys_head_task phys_head_task_split phys phys_head ; do python code/clean.py -m $model; done
+for model in model9 default ; do python code/clean.py -m $model; done
+for model in model9_task default_task ; do python code/clean.py -m $model; done
 """
 
 import warnings
@@ -9,6 +11,7 @@ import h5py
 import numpy as np
 from constants import (
     RUN_TRIAL_SLICE,
+    RUN_TRS,
     RUNS,
     SUBS_STRANGERS,
     TR,
@@ -32,146 +35,145 @@ DEFAULT_CONFOUND_MODEL = {
 }
 
 # from Speer et al., 2023
-CONFOUND_MODEL9 = [
-    "cosine",
-    "trans_x",
-    "trans_y",
-    "trans_z",
-    "rot_x",
-    "rot_y",
-    "rot_z",
-    # squared
-    "trans_x_power2",
-    "trans_y_power2",
-    "trans_z_power2",
-    "rot_x_power2",
-    "rot_y_power2",
-    "rot_z_power2",
-    # derivatives
-    "trans_x_derivative1",
-    "trans_y_derivative1",
-    "trans_z_derivative1",
-    "rot_x_derivative1",
-    "rot_y_derivative1",
-    "rot_z_derivative1",
-    # derivative powers
-    "trans_x_derivative1_power2",
-    "trans_y_derivative1_power2",
-    "trans_z_derivative1_power2",
-    "rot_x_derivative1_power2",
-    "rot_y_derivative1_power2",
-    "rot_z_derivative1_power2",
-    "white_matter",
-    "white_matter_power2",
-    "white_matter_derivative1",
-    "white_matter_derivative1_power2",
-    "csf",
-    "csf_power2",
-    "csf_derivative1",
-    "csf_derivative1_power2",
-]
-
-CONFOUND_MODELS = {
-    "model9": dict(run_confounds=CONFOUND_MODEL9),
-    "model9_task": dict(run_confounds=CONFOUND_MODEL9, add_task_confs=True),
-
-    "default": dict(run_confounds=DEFAULT_CONFOUND_MODEL),
-    "default_task": dict(run_confounds=DEFAULT_CONFOUND_MODEL, add_task_confs=True),
-
-    # "nomot": dict(run_confounds=CONFOUND_REGRESSORS),
-    # "runmot": dict(run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS),
-    # "runmot24": dict(
-    #     run_confounds=CONFOUND_REGRESSORS + MOTION_CONFOUNDS + EXTRA_MOTION_CONFOUNDS
-    # ),
-    # "trialmot": dict(
-    #     run_confounds=CONFOUND_REGRESSORS,
-    #     trial_confounds=MOTION_CONFOUNDS,
-    #     add_task_confs=True,
-    # ),
-    # "splitmot": dict(
-    #     run_confounds=CONFOUND_REGRESSORS,
-    #     split_confounds=MOTION_CONFOUNDS,
-    #     add_task_confs=True,
-    # ),
-    # # New:
-    # "phys": dict(phys_regressors=CONFOUND_REGRESSORS),
-    # "phys_head": dict(
-    #     phys_regressors=CONFOUND_REGRESSORS, mot_regressors=MOTION_CONFOUNDS
-    # ),
-    # "phys_head_task": dict(
-    #     phys_regressors=CONFOUND_REGRESSORS,
-    #     mot_regressors=MOTION_CONFOUNDS,
-    #     add_task_confounds=True,
-    # ),
-    # "phys_head_task_split": dict(
-    #     phys_regressors=CONFOUND_REGRESSORS,
-    #     mot_regressors=MOTION_CONFOUNDS,
-    #     add_task_confounds=True,
-    #     split_confounds=True,
-    # ),
+CONFOUND_MODEL9 = {
+    "confounds": [
+        "cosine",
+        "trans_x",
+        "trans_y",
+        "trans_z",
+        "rot_x",
+        "rot_y",
+        "rot_z",
+        # squared
+        "trans_x_power2",
+        "trans_y_power2",
+        "trans_z_power2",
+        "rot_x_power2",
+        "rot_y_power2",
+        "rot_z_power2",
+        # derivatives
+        "trans_x_derivative1",
+        "trans_y_derivative1",
+        "trans_z_derivative1",
+        "rot_x_derivative1",
+        "rot_y_derivative1",
+        "rot_z_derivative1",
+        # derivative powers
+        "trans_x_derivative1_power2",
+        "trans_y_derivative1_power2",
+        "trans_z_derivative1_power2",
+        "rot_x_derivative1_power2",
+        "rot_y_derivative1_power2",
+        "rot_z_derivative1_power2",
+        "white_matter",
+        "white_matter_power2",
+        "white_matter_derivative1",
+        "white_matter_derivative1_power2",
+        "csf",
+        "csf_power2",
+        "csf_derivative1",
+        "csf_derivative1_power2",
+    ]
 }
 
-def run_level_regression(model: str, **kwargs):
-    """
-    three kinds of confounds: physiological, head motion, and task
-    """
+CONFOUND_MODELS = {
+    "model9": dict(confounds=CONFOUND_MODEL9),
+    "default": dict(confounds=DEFAULT_CONFOUND_MODEL),
+    "model9_task": dict(confounds=CONFOUND_MODEL9, add_task_confs=True),
+    "default_task": dict(confounds=DEFAULT_CONFOUND_MODEL, add_task_confs=True),
+}
 
-    model_params = CONFOUND_MODELS[model]
+
+def get_timinglog_run_regressors(dft_run):
+
+    # create trial level boxcar
+    dft_trial = dft_run[dft_run.role.str.startswith("trial").fillna(False)]
+    trial_onsets = (dft_trial["run.time"] / TR).astype(int).to_numpy()
+    assert len(trial_onsets) % 2 == 0
+    trial_boxcar = np.zeros(RUN_TRS)
+    for i in range(0, len(trial_onsets), 2):
+        start, stop = trial_onsets[i], trial_onsets[i + 1]
+        trial_boxcar[start:stop] = 1
+
+    # create speaking and listening boxcars
+    dft_speech = dft_run[(dft_run.role == "speaker") | (dft_run.role == "listener")]
+    speech_onsets = (dft_speech["run.time"] / TR).astype(int).to_numpy()
+    speech_boxcar = np.zeros(RUN_TRS)
+    listen_boxcar = np.zeros(RUN_TRS)
+    for i in range(len(speech_onsets) - 1):
+        start = speech_onsets[i]
+        stop = speech_onsets[i + 1]
+        if dft_speech.iloc[i]["role"] == "speaker":
+            speech_boxcar[start:stop] = 1
+        else:
+            listen_boxcar[start:stop] = 1
+
+    # create button press indicators
+    button_presses = np.diff(speech_boxcar, prepend=speech_boxcar[0])
+    speech_buttons = np.abs(np.clip(button_presses, a_min=-1, a_max=0))
+    listen_buttons = np.abs(np.clip(button_presses, a_min=0, a_max=1))
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(12, 4))
+    # plt.plot(speech_boxcar)
+    # plt.plot(speech_buttons)
+    # plt.plot(listen_boxcar * 0.5)
+    # plt.plot(listen_buttons * 0.5)
+    # plt.savefig("test.png")
+    # breakpoint()
 
     kernel = glover_hrf(TR, oversampling=1, time_length=20)
 
-    phys_regressors = model_params.get("phys_regressors", [])
-    mot_regressors = model_params.get("mot_regressors", [])
-    add_task_confs = model_params.get("add_task_confounds", False)
+    n = len(speech_boxcar)
+    task_confounds = np.stack(
+        (
+            np.convolve(trial_boxcar, kernel)[:n],
+            np.convolve(speech_boxcar, kernel)[:n],
+            np.convolve(listen_boxcar, kernel)[:n],
+            np.convolve(speech_buttons, kernel)[:n],
+            np.convolve(listen_buttons, kernel)[:n],
+        )
+    )
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(12, 4))
+    # plt.plot(task_confounds[0])
+    # plt.plot(task_confounds[1])
+    # plt.plot(task_confounds[2])
+    # plt.plot(task_confounds[3])
+    # plt.plot(task_confounds[4])
+    # plt.savefig("test2.png")
+    # breakpoint()
+
+    return task_confounds.T
+
+
+def run_level_regression(model: str, **kwargs):
+    model_params = CONFOUND_MODELS[model]
 
     for sub_id in tqdm(SUBS_STRANGERS):
+        dft = subject.get_timing(sub_id, condition=None)
 
-        prod_boxcar, button_idsP, button_idsC = subject.get_timinglog_boxcars(sub_id)
-        if add_task_confs:
-            n = len(prod_boxcar)
-            task_confounds = np.stack(
-                (
-                    np.convolve(prod_boxcar, kernel)[:n],
-                    np.convolve(1 - prod_boxcar, kernel)[:n],
-                    np.convolve(button_idsP, kernel)[:n],
-                    np.convolve(button_idsC, kernel)[:n],
-                )
+        clean_bold = []
+        run2trial = subject.get_trials(sub_id)
+        for run in RUNS:
+
+            bold = subject.get_raw_bold(sub_id, runs=[run], trial_level=False)
+            bold = bold.T
+
+            confounds = subject.get_confounds(
+                sub_id,
+                runs=[run],
+                trial_level=False,
+                model_spec=model_params["confounds"],
             )
-            task_confounds = task_confounds.T
+            dft_run = dft[dft.run == run]
+            if model_params.get("add_task_confs", False):
+                task_confounds = get_timinglog_run_regressors(dft_run)
+                confounds = np.hstack((confounds, task_confounds))
 
-        phys_confounds = subject.get_confounds(
-            sub_id,
-            trial_level=True,
-            confounds=phys_regressors,
-        )
-        mot_confounds = subject.get_confounds(
-            sub_id,
-            trial_level=True,
-            confounds=mot_regressors,
-        )
-
-        bold = subject.get_raw_bold(sub_id, trial_level=True)
-        bold = bold.T
-
-        clean_bold = np.zeros_like(bold)
-        for trial_slice in TRIAL_SLICES:
-            bold_trial = bold[trial_slice]
-            conf_trial = []
-
-            if len(mot_regressors):
-                mot_trial = mot_confounds[trial_slice]
-                conf_trial.append(mot_trial)
-
-            if add_task_confs:
-                task_trial = task_confounds[trial_slice]
-                conf_trial.append(task_trial)
-
-            if len(phys_regressors):
-                conf_trial.append(phys_confounds[trial_slice])
-
-            confounds = np.hstack(conf_trial)
             cleaned_bold = signal.clean(
-                bold_trial,
+                bold,
                 confounds=confounds,
                 detrend=True,
                 t_r=TR,
@@ -180,7 +182,12 @@ def run_level_regression(model: str, **kwargs):
                 standardize_confounds=True,
             )
 
-            clean_bold[trial_slice] = cleaned_bold
+            # slice out generate trials
+            for trial in run2trial[run]:
+                trial_slice = RUN_TRIAL_SLICE[trial]
+                cleaned_bold_trial = cleaned_bold[trial_slice]
+                zscored_bold_trial = np.nan_to_num(zscore(cleaned_bold_trial))
+                clean_bold.append(zscored_bold_trial)
 
         cleaned_bold = np.vstack(clean_bold)
 
@@ -195,7 +202,6 @@ def run_level_regression(model: str, **kwargs):
         boldpath.mkdirs()
         with h5py.File(boldpath, "w") as f:
             f.create_dataset(name="bold", data=cleaned_bold)
-
 
 
 def trial_level_regression(model: str, **kwargs):
@@ -443,5 +449,4 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--model", type=str, default="nomot")
     parser.add_argument("-v", "--verbose", action="store_true")
 
-    # twostep(**vars(parser.parse_args()))
-    trial_level_regression(**vars(parser.parse_args()))
+    run_level_regression(**vars(parser.parse_args()))

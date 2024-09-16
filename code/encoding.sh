@@ -39,31 +39,40 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
     fi
 fi
 
-modelname=model-gpt2-2b_layer-24
-modelname=model-llama3-8b_layer-16
+# cache=model9
+# cache=default
+# cache=model9_task
+
+cache=default_task
 
 space=joint
-# nosplit takes 2:15 with 4G RAM
-# space=joint_nosplit
+modelname=model-gpt2-2b_layer-24
+
+# space=acoustic
 # space=contextual
 # space=articulatory
-# space=acoustic
-# space=phonemic
+# modelname=model-gpt2-2b_layer-24
 
 # space=syntactic
-# modelname=syntactic
-
-# space=joint_syntactic
 # modelname=syntactic
 
 # space=static
 # modelname=model-gpt2-2b_layer-0
 
-echo $modelname $space
+# space=joint_syntactic
+# modelname=syntactic
+
+# nosplit takes 2:15 with 4G RAM
+# space=joint_nosplit
+
+# to save weights when running 2 folds:
+# --suffix _n2 --save-weights
+
+echo $modelname $space $cache
 
 for sub in "${subjects[@]}"; do
     echo $sub
-    python code/encoding.py -s "$sub" -j 1 -m "$space" --lang-model "$modelname" --cache trialmot9 --suffix _t9llama --save-preds
+    python code/encoding.py -s "$sub" -j 1 -m "$space" --lang-model "$modelname" --cache "$cache" --save-preds 
 done
 
 echo "${CONDA_PROMPT_MODIFIER}End time:" `date`

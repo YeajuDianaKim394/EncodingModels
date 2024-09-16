@@ -1,4 +1,3 @@
-import json
 from glob import glob
 
 import h5py
@@ -6,6 +5,7 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 from constants import RUN_TRIAL_SLICE, RUNS, TR
+from util.extract_confounds import extract_confounds, load_confounds
 
 from .path import Path
 
@@ -22,7 +22,7 @@ def recode_trial(trial: int) -> int:
     return ((int(trial) - 1) % 4) + 1
 
 
-def get_timing(sub_id: int, condition="G") -> pd.DataFrame:
+def get_timing(sub_id: int, condition: str = "G") -> pd.DataFrame:
     timingpath = Path(
         root="data/stimuli",
         conv=get_conv(sub_id),
@@ -31,9 +31,10 @@ def get_timing(sub_id: int, condition="G") -> pd.DataFrame:
         ext=".csv",
     )
     dft = pd.read_csv(timingpath)
-    dft = dft[["run", "trial", "condition", "role", "comm.time"]]
-    dft = dft[dft.condition == condition]
-    dft.dropna(subset=["comm.time"], inplace=True)
+    dft = dft[["run", "trial", "condition", "role", "comm.time", "run.time"]]
+    if condition is not None:
+        dft = dft[dft.condition == condition]
+        dft.dropna(subset=["comm.time"], inplace=True)
 
     return dft
 
@@ -105,10 +106,9 @@ def get_timinglog_boxcars(sub_id: int, condition: str = "G"):
 
 def get_confounds(
     sub_id: int,
+    model_spec: dict,
     runs: list[int] = RUNS,
-    confounds: list[str] = ["framewise_displacement"],
     trial_level: bool = True,
-    n_a_comp_cor: int = 5,
 ):
     confound_path = Path(
         root="data/derivatives/fmriprep",
@@ -125,57 +125,25 @@ def get_confounds(
     if trial_level:
         run2trial = get_trials(sub_id)
 
-    dfs = []
+    all_confounds = []
     for run in runs:
         confound_path.update(run=run)
 
-        if "a_comp_cor" in confounds:
-            confounds = confounds.copy()
-
-            confound_path.update(ext=".json")
-            with open(confound_path, "r") as f:
-                confounds_meta = json.load(f)
-
-            confound_path.update(ext=".tsv")
-            conf_df = pd.read_csv(confound_path, sep="\t", nrows=1)
-            available_confounds = conf_df.columns.tolist()
-
-            conf_meta = pd.DataFrame(confounds_meta).T
-            conf_meta.dropna(inplace=True)
-            conf_meta = conf_meta[conf_meta["Retained"]]
-            conf_meta = conf_meta[conf_meta["Method"] == "aCompCor"]
-            conf_meta.sort_values(
-                ["Mask", "VarianceExplained"], ascending=False, inplace=True
-            )
-
-            top_csf = conf_meta[conf_meta["Mask"] == "CSF"].index.tolist()
-            top_wm = conf_meta[conf_meta["Mask"] == "WM"].index.tolist()
-            top_csf = top_csf[:n_a_comp_cor]
-            top_wm = top_wm[:n_a_comp_cor]
-
-            assert np.in1d(top_csf, available_confounds).all()
-            assert np.in1d(top_wm, available_confounds).all()
-
-            confounds.extend(top_csf)
-            confounds.extend(top_wm)
-            confounds.pop(confounds.index("a_comp_cor"))
-
-        confound_path.update(ext=".tsv")
-        conf_df = pd.read_csv(confound_path, sep="\t", usecols=confounds)
-        conf_df.fillna(value=0, inplace=True)
+        confounds_df, confounds_meta = load_confounds(confound_path.fpath)
+        confounds_df.bfill(inplace=True)  # fill in nans when using derivatives
+        confounds = extract_confounds(confounds_df, confounds_meta, model_spec)
 
         if trial_level:
             trials = run2trial[run]
             for trial in trials:
                 trial_slice = RUN_TRIAL_SLICE[trial]
-                dfs.append(conf_df.iloc[trial_slice])
+                all_confounds.append(confounds[trial_slice, :])
         else:
-            dfs.append(conf_df)
+            all_confounds.append(confounds)
 
-    conf_df = pd.concat(dfs)
-    conf_data = conf_df.to_numpy()
+    all_confounds = np.vstack(all_confounds)
 
-    return conf_data
+    return all_confounds
 
 
 def get_raw_bold(

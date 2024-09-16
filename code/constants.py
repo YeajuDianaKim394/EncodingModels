@@ -15,6 +15,7 @@ ORG = "#de8f05"  # HSL: (38, 95, 45)
 RUN_TRS = 544
 TRIAL_TRS = 134  # excluding the first 12s (8 TR) blank on first trial of a run
 CONV_TRS = 120
+TRIAL_SLICES = [slice(i, i + 120) for i in range(0, 1200, 120)]
 
 # Within each run, these are the indices of each trial, excluding prompt and blanks
 RUN_TRIAL_SLICE = {
@@ -110,48 +111,6 @@ CONVS = CONVS_STRANGERS + CONVS_FRIENDS
 SUBS_STRANGERS = list(CONVS_STRANGERS) + [c - 100 for c in CONVS_STRANGERS]
 SUBS_FRIENDS = list(CONVS_FRIENDS) + [c - 100 for c in CONVS_FRIENDS]
 SUBS = SUBS_FRIENDS + SUBS_STRANGERS
-
-CONFOUND_REGRESSORS = [
-    "a_comp_cor_00",
-    "a_comp_cor_01",
-    "a_comp_cor_02",
-    "a_comp_cor_03",
-    "a_comp_cor_04",
-    "cosine00",
-    "cosine01",
-    "cosine02",
-    "cosine03",
-    "cosine04",
-    "cosine05",
-    "cosine06",
-    "cosine07",
-    "cosine08",
-    "cosine09",
-    "cosine10",
-]
-
-MOTION_CONFOUNDS = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
-
-EXTRA_MOTION_CONFOUNDS = [
-    "trans_x_derivative1",
-    "trans_y_derivative1",
-    "trans_z_derivative1",
-    "trans_x_derivative1_power2",
-    "trans_y_derivative1_power2",
-    "trans_z_derivative1_power2",
-    "rot_x_derivative1",
-    "rot_y_derivative1",
-    "rot_z_derivative1",
-    "rot_x_derivative1_power2",
-    "rot_y_derivative1_power2",
-    "rot_z_derivative1_power2",
-    "trans_x_power2",
-    "trans_y_power2",
-    "trans_z_power2",
-    "rot_x_power2",
-    "rot_y_power2",
-    "rot_z_power2",
-]
 
 ARPABET_PHONES = [
     "B",

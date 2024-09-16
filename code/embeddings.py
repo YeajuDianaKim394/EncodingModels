@@ -1,10 +1,5 @@
 """Add embeddings to an events file that has words.
 
-sbatch --job-name=emb --mem=8G --time=00:05:00 --gres=gpu:1 code/slurm.sh -- code/embeddings.py -m gpt2-2b --layer 24
-sbatch --job-name=emb --mem=36G --time=00:05:00 --gres=gpu:1 --constraint=gpu80 code/slurm.sh -- code/embeddings.py -m gemma2-9b --layer 22
-
-python code/embeddings.py -m gpt2-2b --layer 0
-
 """
 
 from glob import glob

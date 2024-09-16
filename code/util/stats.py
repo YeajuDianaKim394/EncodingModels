@@ -10,20 +10,26 @@ def ttest_1samp(
     correlations: bool = True,
     alternative: str = "two-sided",
     alpha: float = 0.01,
+    median_mask=True,
     method="bonf",
 ):
     if correlations:
         values = np.arctanh(values)
 
-    fgmask = get_brainmask()
+    fgmask = slice(None)
+    if median_mask:
+        fgmask = get_brainmask()
 
     ttest = stats.ttest_1samp(values, popmean=popmean, alternative=alternative)
 
     pvalues = ttest.pvalue
-    multiple = multipletests(pvalues[fgmask], alpha=alpha, method=method)
+    outputs = multipletests(pvalues[fgmask], alpha=alpha, method=method)
 
     reject = np.zeros_like(pvalues, dtype=bool)
-    reject[*fgmask.nonzero()] = multiple[0]
+    if median_mask:
+        reject[*fgmask.nonzero()] = outputs[0]
+    else:
+        reject = outputs[0]
 
     return reject
 

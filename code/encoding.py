@@ -198,7 +198,7 @@ def get_regressors(sub_id: int, modelname: str, split: bool = True):
         values = np.concatenate(regressors["lexical_emb"])
         missingMask = values.sum(0) > 0
         if not np.all(missingMask):
-            print("[WARNING] contains features with all 0s", missingMask.sum())
+            print("[WARNING] contains features with all 0s", missingMask.sum(), len(missingMask))
             values = values[:, missingMask]
         regressors["lexical_emb"] = values
 
@@ -230,8 +230,10 @@ def get_regressors(sub_id: int, modelname: str, split: bool = True):
     return regressors
 
 
-def build_regressors(subject: int, modelname: str, spaces: dict = None):
-    regressors = get_regressors(subject, modelname, split=True)  # NOTE split
+def build_regressors(
+    subject: int, modelname: str, spaces: dict = None, split: bool = True
+):
+    regressors = get_regressors(subject, modelname, split=split)
 
     X = []
     start = 0
@@ -305,7 +307,8 @@ def main(args):
     modelname = args.lang_model
 
     spaces = SPACES[space]
-    X, features = build_regressors(sub, modelname, spaces=spaces)
+    split = "nosplit" not in space
+    X, features = build_regressors(sub, modelname, spaces=spaces, split=split)
     X = X.astype(np.float32)
     feature_names = list(features.keys())
     slices = list(features.values())
@@ -322,9 +325,8 @@ def main(args):
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
-    # kfold = KFold(n_splits=2)
+    kfold = KFold(n_splits=2)  # NOTE override
     for k, (train_index, test_index) in enumerate(kfold.split(X)):
-        # for k, (test_index, train_index) in enumerate(kfold.split(X)):
         X_train, X_test = X[train_index], X[test_index]
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
         print(
@@ -336,7 +338,7 @@ def main(args):
             Y_test.shape,
         )
 
-        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
+        # pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
         pipeline.fit(X_train, Y_train)
 
         Y_preds = pipeline.predict(X_test, split=True)
@@ -420,7 +422,7 @@ if __name__ == "__main__":
     if args.atlas is not None:
         desc = args.atlas
     pklpath = Path(
-        root=f"results/encoding{args.suffix}",
+        root=f"results/encoding_{args.cache}{args.suffix}",
         sub=f"{args.subject:03d}",
         datatype=args.model,
         desc=desc,

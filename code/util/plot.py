@@ -23,6 +23,10 @@ from .atlas import Atlas
 _image_cache = {}
 
 
+def two_brain_fig(**kwargs):
+    return plt.subplots(1, 2, figsize=(4.5, 4.5), **kwargs)
+
+
 def standalone_colorbar(
     cmap: str,
     ticks=(0, 1),
@@ -30,6 +34,7 @@ def standalone_colorbar(
     figsize=(1.5, 1),
     orientation="h",
     dpi: int = 300,
+    font_size: float = 8,
 ):
     """Adapted from https://stackoverflow.com/a/62436015"""
 
@@ -47,6 +52,8 @@ def standalone_colorbar(
         cbar = mpl.colorbar.ColorbarBase(ax, orientation="vertical", cmap=cmap)
         cbar.ax.set_yticks(ticks)
         cbar.ax.set_yticklabels(tick_labels)
+
+    cbar.ax.tick_params(labelsize=font_size)
 
     return fig
 
