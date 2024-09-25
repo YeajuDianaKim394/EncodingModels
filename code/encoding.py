@@ -5,6 +5,8 @@ https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/03_plot_wor
 https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/06_plot_banded_ridge_model.html
 """
 
+import os
+
 from argparse import ArgumentParser
 from collections import defaultdict
 from datetime import datetime
@@ -13,7 +15,7 @@ from glob import glob
 import h5py
 import numpy as np
 import torch
-from constants import CONV_TRS, RUNS, TR
+from constants import CONV_TRS, RUNS, TR, SUBS_STRANGERS
 from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score_split
@@ -21,7 +23,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import KFold, PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from util.atlas import Atlas
 from util.path import Path
 from util.subject import (
     get_bold,
@@ -144,7 +145,6 @@ def get_regressors(sub_id: int, modelname: str, split: bool = True):
     conv = get_conv(sub_id)
     dfemb = get_transcript_features(sub_id, modelname=modelname)
     dfphone = get_transcript_features(sub_id, modelname="articulatory")
-    # dfphone = get_transcript_features(sub_id, modelname="phonemic")
 
     regressors = defaultdict(list)
 
@@ -198,7 +198,11 @@ def get_regressors(sub_id: int, modelname: str, split: bool = True):
         values = np.concatenate(regressors["lexical_emb"])
         missingMask = values.sum(0) > 0
         if not np.all(missingMask):
-            print("[WARNING] contains features with all 0s", missingMask.sum(), len(missingMask))
+            print(
+                "[WARNING] contains features with all 0s",
+                missingMask.sum(),
+                len(missingMask),
+            )
             values = values[:, missingMask]
         regressors["lexical_emb"] = values
 
@@ -301,31 +305,34 @@ def build_model(
     return pipeline
 
 
-def main(args):
-    sub = args.subject
-    space = args.model
-    modelname = args.lang_model
+def encoding(
+    sub_id: int,
+    space: str,
+    lang_model: str,
+    cache: str,
+    save_weights: bool,
+    save_preds: bool,
+    verbose: bool,
+    n_jobs: int,
+    alphas: np.ndarray,
+) -> dict:
 
     spaces = SPACES[space]
     split = "nosplit" not in space
-    X, features = build_regressors(sub, modelname, spaces=spaces, split=split)
+    X, features = build_regressors(sub_id, lang_model, spaces=spaces, split=split)
     X = X.astype(np.float32)
     feature_names = list(features.keys())
     slices = list(features.values())
 
     delayer = SplitDelayer(delays=[2, 3, 4, 5])
-    pipeline = build_model(feature_names, slices, args.alphas, args.verbose, args.jobs)
+    pipeline = build_model(feature_names, slices, alphas, verbose, n_jobs)
 
-    Y_bold = get_bold(sub, cache=args.cache)
-    if args.atlas is not None:
-        atlas = Atlas.schaefer(100)
-        Y_bold = atlas.vox_to_parc(Y_bold)
-        print(Y_bold.shape)
+    Y_bold = get_bold(sub_id, cache=cache)
 
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
-    kfold = KFold(n_splits=2)  # NOTE override
+    # kfold = KFold(n_splits=2)  # NOTE override
     for k, (train_index, test_index) in enumerate(kfold.split(X)):
         X_train, X_test = X[train_index], X[test_index]
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
@@ -338,7 +345,7 @@ def main(args):
             Y_test.shape,
         )
 
-        # pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
+        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
         pipeline.fit(X_train, Y_train)
 
         Y_preds = pipeline.predict(X_test, split=True)
@@ -358,7 +365,7 @@ def main(args):
         )
 
         enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
-        if args.save_weights:
+        if save_weights:
             Xfit = pipeline["columnkernelizer"].get_X_fit()
             weights = enc_model.get_primal_coef(Xfit)
 
@@ -381,7 +388,7 @@ def main(args):
         results["cv_alphas"].append(enc_model.best_alphas_.numpy(force=True))
         results["cv_prodmask"].append(prod_mask)
 
-        if args.save_preds:
+        if save_preds:
             results["cv_preds"].append(Y_preds.numpy(force=True))
 
     # stack across folds
@@ -389,46 +396,55 @@ def main(args):
     return result
 
 
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("-s", "--subject", type=int, required=True)
-    parser.add_argument("-m", "--model", type=str, default="joint")
-    parser.add_argument(
-        "-lm", "--lang-model", type=str, default="model-gpt2-2b_layer-24"
-    )
-    parser.add_argument("--cache", type=str, default="trialmot9")
-    parser.add_argument("-j", "--jobs", type=int, default=1)
-    parser.add_argument("--cuda", type=int, default=1)
-    parser.add_argument("--suffix", type=str, default="")
-    parser.add_argument("--atlas", type=str, default=None)
-    parser.add_argument("--save-weights", action="store_true")
-    parser.add_argument("--save-preds", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-    args.alphas = np.logspace(0, 19, 20)
-    print(datetime.now(), "Start", args.model, args.cache)
-
-    if args.cuda > 0:
+def main(subject: list[int], model: str, cache: str, suffix: str, cuda: int, **kwargs):
+    if cuda > 0:
         if torch.cuda.is_available():
             set_backend("torch_cuda")
         else:
             print("[WARN] cuda not available")
 
-    result = main(args)
+    for sub_id in subject:
+        print(datetime.now(), "Start", sub_id)
+        result = encoding(sub_id, space=model, cache=cache, **kwargs)
 
-    print(datetime.now(), "Saving")
-    desc = None
-    # desc = "folds-2"
-    if args.atlas is not None:
-        desc = args.atlas
-    pklpath = Path(
-        root=f"results/encoding_{args.cache}{args.suffix}",
-        sub=f"{args.subject:03d}",
-        datatype=args.model,
-        desc=desc,
-        ext=".hdf5",
+        print(datetime.now(), "Saving", sub_id)
+        desc = None
+        # desc = "folds-2"
+        pklpath = Path(
+            root=f"results/encoding_{cache}{suffix}",
+            sub=f"{sub_id:03d}",
+            datatype=model,
+            desc=desc,
+            ext=".hdf5",
+        )
+        pklpath.mkdirs()
+        with h5py.File(pklpath, "w") as f:
+            for key, value in result.items():
+                f.create_dataset(name=key, data=value)
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("-s", "--subject", nargs="+", type=int)
+    parser.add_argument("-m", "--model", type=str, default="joint")
+    parser.add_argument(
+        "-lm", "--lang-model", type=str, default="model-gpt2-2b_layer-24"
     )
-    pklpath.mkdirs()
-    with h5py.File(pklpath, "w") as f:
-        for key, value in result.items():
-            f.create_dataset(name=key, data=value)
+    parser.add_argument("-j", "--n-jobs", type=int, default=1)
+    parser.add_argument("--cache", type=str, default="default_task")
+    parser.add_argument("--cuda", type=int, default=1)
+    parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument("--save-weights", action="store_true")
+    parser.add_argument("--save-preds", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    _args = parser.parse_args()
+    _args.alphas = np.logspace(0, 19, 20)
+
+    if task_id := os.environ.get("SLURM_ARRAY_TASK_ID"):
+        portion = int(task_id) - 1
+        subject_chunks = np.array_split(np.array(SUBS_STRANGERS), 4)
+        subject_subset = subject_chunks[portion]
+        print("Using SLRUM ID", task_id, subject_subset)
+        _args.subject = subject_subset
+
+    main(**vars(_args))
