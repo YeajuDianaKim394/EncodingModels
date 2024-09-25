@@ -145,7 +145,7 @@ def get_timinglog_run_regressors(sub_id: int, dft_run: pd.DataFrame):
 def run_level_regression(model: str, **kwargs):
     model_params = CONFOUND_MODELS[model]
 
-    hrf = glover_hrf(TR, oversampling=TR)
+    hrf = glover_hrf(TR, oversampling=1)
 
     for sub_id in tqdm(SUBS_STRANGERS):
         dft = subject.get_timing(sub_id, condition=None)
