@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --time=01:00:00
-#SBATCH -o 'logs/%A-%x.log'
+#SBATCH --nodes=1                # node count
+#SBATCH --ntasks=1               # total number of tasks across all nodes
+#SBATCH --cpus-per-task=1        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH -o 'logs/%A-%x_%a.log'
 
 source /usr/share/Modules/init/bash
-module load anaconda3/2023.3
+module load anaconda3/2024.6
+# module load cudatoolkit/11.7 cudnn/cuda-11.x/8.2.0
 conda activate fconv
 
 echo "${CONDA_PROMPT_MODIFIER}Job: $SLURM_JOB_NAME"
