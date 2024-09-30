@@ -99,15 +99,13 @@ def get_timinglog_run_regressors(sub_id: int, dft_run: pd.DataFrame):
 
     screen_change = np.abs(np.diff(prompt_boxcar, prepend=0))
 
-    # the timing log is at the conversation level, defaulted to sub>100
-    # so speaker in the timinglog always refers to the sub_id>100
-    # here, we swap them if the sub_id < 100
     speaker_role = "speaker" if sub_id > 100 else "listener"
     listener_role = "listener" if sub_id > 100 else "speaker"
 
     # create speaking and listening boxcars
     speech_onsets = (dft_run["run.time"] / TR).astype(int).to_numpy()
     button_press = np.zeros(RUN_TRS)
+    receive_press = np.zeros(RUN_TRS)
     speech_boxcar = np.zeros(RUN_TRS)
     listen_boxcar = np.zeros(RUN_TRS)
     for i in range(len(speech_onsets) - 1):
@@ -129,6 +127,7 @@ def get_timinglog_run_regressors(sub_id: int, dft_run: pd.DataFrame):
             dft_run.iloc[i]["role"] == listener_role
             and dft_run.iloc[i + 1]["role"] == speaker_role
         ):
+            receive_press[stop] = 1
             screen_change[start] = 1
             screen_change[stop] = 1
 
@@ -138,6 +137,7 @@ def get_timinglog_run_regressors(sub_id: int, dft_run: pd.DataFrame):
         speech_boxcar,
         listen_boxcar,
         button_press,
+        receive_press,
         screen_change,
     ]
 
