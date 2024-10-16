@@ -137,7 +137,7 @@ def get_confounds(
             trials = run2trial[run]
             for trial in trials:
                 trial_slice = RUN_TRIAL_SLICE[trial]
-                all_confounds.append(confounds[trial_slice, :])
+                all_confounds.append(confounds.iloc[trial_slice, :])
         else:
             all_confounds.append(confounds)
 
