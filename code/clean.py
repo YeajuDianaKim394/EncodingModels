@@ -81,6 +81,7 @@ CONFOUND_MODELS = {
     "default": dict(confounds=DEFAULT_CONFOUND_MODEL),
     "model9_task": dict(confounds=CONFOUND_MODEL9, add_task_confs=True),
     "default_task": dict(confounds=DEFAULT_CONFOUND_MODEL, add_task_confs=True),
+    "default_task_trial": dict(confounds=DEFAULT_CONFOUND_MODEL, add_task_confs=True),
 }
 
 
@@ -205,11 +206,81 @@ def run_level_regression(model: str, **kwargs):
             f.create_dataset(name="bold", data=cleaned_bold)
 
 
+def trial_level_regression(model: str, **kwargs):
+    model_params = CONFOUND_MODELS[model]
+
+    hrf = glover_hrf(TR, oversampling=1)
+
+    for sub_id in tqdm(SUBS_STRANGERS):
+        dft = subject.get_timing(sub_id, condition=None)
+
+        clean_bold = []
+        run2trial = subject.get_trials(sub_id, condition="G")
+        for run in RUNS:
+
+            bold = subject.get_raw_bold(sub_id, runs=[run], trial_level=False)
+            bold = bold.T
+
+            confounds = subject.get_confounds(
+                sub_id,
+                runs=[run],
+                trial_level=False,
+                model_spec=model_params["confounds"],
+            )
+            dft_run = dft[dft.run == run]
+            if model_params.get("add_task_confs", False):
+                task_confounds = get_timinglog_run_regressors(sub_id, dft_run)
+                task_confounds = [
+                    np.convolve(confound, hrf, mode="full")[:RUN_TRS]
+                    for confound in task_confounds
+                ]
+                task_confounds = np.stack(task_confounds).T
+                confounds = np.hstack((confounds, task_confounds))
+
+            # slice out generate trials
+            for trial in run2trial[run]:
+                trial_slice = RUN_TRIAL_SLICE[trial]
+
+                cleaned_bold = signal.clean(
+                    bold[trial_slice],
+                    confounds=confounds[trial_slice],
+                    detrend=True,
+                    t_r=TR,
+                    ensure_finite=True,
+                    standardize="zscore_sample",
+                    standardize_confounds=True,
+                )
+
+                clean_bold.append(cleaned_bold)
+
+        cleaned_bold = np.vstack(clean_bold)
+
+        boldpath = Path(
+            root="data/derivatives/clean",
+            datatype=model,
+            sub=f"{sub_id:03d}",
+            task="conv",
+            space="fsaverage6",
+            ext=".h5",
+        )
+        boldpath.mkdirs()
+        with h5py.File(boldpath, "w") as f:
+            f.create_dataset(name="bold", data=cleaned_bold)
+
+
+def main(model: str, **kwargs):
+
+    if model.endswith("trial"):
+        trial_level_regression(model, **kwargs)
+    else:
+        run_level_regression(model, **kwargs)
+
+
 if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", type=str, default="nomot")
+    parser.add_argument("-m", "--model", type=str, default="default_task_trial")
     parser.add_argument("-v", "--verbose", action="store_true")
 
-    run_level_regression(**vars(parser.parse_args()))
+    main(**vars(parser.parse_args()))
