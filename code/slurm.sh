@@ -19,6 +19,7 @@ echo "${CONDA_PROMPT_MODIFIER}Start time:" `date`
 
 export TQDM_DISABLE=1
 export TOKENIZERS_PARALLELISM=false
+export HF_ACCESS_TOKEN="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"
 
 python "$@"
 

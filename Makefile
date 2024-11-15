@@ -1,6 +1,11 @@
 
 make-env:
-	pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm transformers voxelwise_tutorials gensim pandas matplotlib seaborn torch torchaudio torchvision surfplot neuromaps git+https://github.com/m-bain/whisperx.git jupyter tqdm nltk statsmodels h5py netneurotools openpyxl natsort
+	conda create -n fconv
+	conda activate fconv
+	pip install accelerate himalaya nilearn scipy scikit-learn spacy tqdm \
+			    transformers voxelwise_tutorials gensim pandas matplotlib \
+				seaborn torch torchaudio torchvision surfplot neuromaps \
+				jupyter tqdm nltk statsmodels h5py netneurotools openpyxl natsort
 
 download-atlas:
 	# may not be needed. but need to run atlas.ipynb.
@@ -13,14 +18,15 @@ download-atlas:
 split-audio:
 	python code/split_audio_clips.py
 
-whisper_model:
-	git clone https://huggingface.co/guillaumekln/faster-whisper-large-v2 large-ct2
-	git lfs pull --include=model.bin
 
 transcribe:
-	# depends on whisper_model and set HF_TOKEN env variable
-	sbatch --job-name=transcribe --mem=4G --time=00:30:00 --gres=gpu:1 code/slurm.sh -- \
-		whisperx \
+	# prerequisites:
+	# git clone https://huggingface.co/guillaumekln/faster-whisper-large-v2 large-ct2
+	# git lfs pull --include=model.bin
+	# export HF_TOKEN =""
+
+	# salloc --mem=4G --time=01:00:00 --gres=gpu:1
+	whisperx \
 			--model models/large-ct2 \
 			--output_dir data/stimuli/whisperx \
 			--output_format json \
@@ -46,6 +52,48 @@ generate_features:
 	python code/feature_gen.py syntactic
 
 confound_regression:
-	python code/clean.py -m default_task
+	python code/clean.py -m default_task_trial
 
-# encoding:
+black_llm:
+	python code/black_encoding.py -m gpt2-xl --extract-only 
+
+encoding:
+	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
+		code/slurm.sh -- \
+    	code/encoding.py -m llm_split --lang-model model-gpt2-2b_layer-24 --cache default_task_trial --save-preds
+
+encoding_nollm:
+	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
+		code/slurm.sh -- \
+    	code/encoding.py -m joint_split_nollm --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds
+
+
+encoding_diff_models:
+	for space in llm_split; \
+		do echo sbatch --job-name=enc --mem=8G --time=03:00:00 --gres=gpu:1 --array=1,2 \
+			code/slurm.sh -- \
+			code/encoding.py -m "$$space" --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds; \
+	done
+
+encoding_nosplit:
+	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
+		code/slurm.sh -- \
+    	code/encoding.py -m joint_nosplit --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds 
+
+# TODO pass in number of folds
+encoding_2fold:
+	sbatch --job-name=enc --mem=16G --time=01:10:00 --gres=gpu:1 --array=1,2 \
+		code/slurm.sh -- \
+    	code/encoding.py -m joint_split --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds  --suffix _n2 --save-weights
+
+encoding_black2conv:
+	sbatch --job-name=enc_b2c --mem=6G --time=01:10:00 --gres=gpu:1 \
+		code/slurm.sh -- \
+	code/black_encoding.py -m contextual
+
+
+# space=syntactic
+# modelname=syntactic
+
+# space=static
+# modelname=model-gpt2-2b_layer-0

@@ -9,29 +9,66 @@ def ttest_1samp(
     popmean: int = 0,
     correlations: bool = True,
     alternative: str = "two-sided",
-    alpha: float = 0.01,
-    median_mask=True,
-    method="bonf",
 ):
+    """One sample t-test if sample mean is different than `popmean` (default 0).
+    values should be a 1d array of `n` values
+    """
     if correlations:
         values = np.arctanh(values)
 
+    ttest = stats.ttest_1samp(values, popmean=popmean, alternative=alternative)
+    p_values = ttest.pvalue
+    return p_values
+
+
+def correct_multiple_tests(
+    p_values: np.ndarray,
+    method: str = "bonf",
+    alpha: float = 0.05,
+    ignore_median_mask: bool = True,
+):
+
     fgmask = slice(None)
-    if median_mask:
+    if ignore_median_mask:
         fgmask = get_brainmask()
 
-    ttest = stats.ttest_1samp(values, popmean=popmean, alternative=alternative)
+    outputs = multipletests(p_values[fgmask], alpha=alpha, method=method)
 
-    pvalues = ttest.pvalue
-    outputs = multipletests(pvalues[fgmask], alpha=alpha, method=method)
-
-    reject = np.zeros_like(pvalues, dtype=bool)
-    if median_mask:
+    reject = np.zeros_like(p_values, dtype=bool)
+    if ignore_median_mask:
         reject[*fgmask.nonzero()] = outputs[0]
     else:
         reject = outputs[0]
 
     return reject
+
+
+def bootstrap_pvalues(
+    observed: np.ndarray, null_distriution: np.ndarray, alternative: str = "greater"
+) -> np.ndarray:
+    """
+    observed should be an 1d array of `n` values
+    null_distribution should be a 2d array of shape (n_samples, n)
+    """
+    n_dims = len(observed)
+    p_values = np.zeros(n_dims)
+    for i in range(n_dims):
+        nulldist = null_distriution[:, i] - observed[i]
+        p_values[i] = calculate_pvalues(observed[i], nulldist, alternative=alternative)
+    return p_values
+
+
+def bootstrap_distribution(
+    sample: np.ndarray, n_perms: int = 10000, statistic_function=np.mean
+) -> np.ndarray:
+    n_samples, n_dims = sample.shape
+    bootstrap_dist = np.zeros((n_perms, n_dims), dtype=np.float32)
+    for i_perm in range(n_perms):
+        sub_sample = np.random.choice(n_samples, size=n_samples, replace=True)
+        score_sample = sample[sub_sample]
+        sample_stat = statistic_function(score_sample, axis=0)
+        bootstrap_dist[i_perm] = sample_stat
+    return bootstrap_dist
 
 
 def calculate_pvalues(

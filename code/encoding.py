@@ -6,7 +6,6 @@ https://gallantlab.org/voxelwise_tutorials/_auto_examples/shortclips/06_plot_ban
 """
 
 import os
-
 from argparse import ArgumentParser
 from collections import defaultdict
 from datetime import datetime
@@ -15,7 +14,7 @@ from glob import glob
 import h5py
 import numpy as np
 import torch
-from constants import CONV_TRS, RUNS, TR, SUBS_STRANGERS
+from constants import CONV_TRS, RUNS, SUBS_STRANGERS, TR
 from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score_split
@@ -31,73 +30,69 @@ from util.subject import (
     get_transcript_features,
 )
 
-TASK_REGRESSORS = [
-    "prod_screen",
-    "prod_word_onset",
-    "prod_word_rate",
-    "prod_phoneme_rate",
-    "comp_screen",
-    "comp_word_onset",
-    "comp_word_rate",
-    "comp_phoneme_rate",
-]
+# from util.atlas import Atlas
 
 SPACES = {
-    "acoustic": {
-        "task": TASK_REGRESSORS,
-        "prod_spectral": ["prod_spectral_emb"],
-        "comp_spectral": ["comp_spectral_emb"],
+    "llm_split": {
+        "word_stats": [
+            "prod_screen",
+            "comp_screen",
+            "prod_word_onset",
+            "prod_word_rate",
+            "prod_phoneme_rate",
+            "comp_word_onset",
+            "comp_word_rate",
+            "comp_phoneme_rate",
+        ],
+        "llm": ["prod_lexical_emb", "comp_lexical_emb"],
     },
-    "phonemic": {
-        "task": TASK_REGRESSORS,
-        "prod_articulatory": ["prod_phoneme_emb"],
-        "comp_articulatory": ["comp_phoneme_emb"],
-    },
-    "articulatory": {
-        "task": TASK_REGRESSORS,
-        "prod_articulatory": ["prod_phoneme_emb"],
-        "comp_articulatory": ["comp_phoneme_emb"],
-    },
-    "syntactic": {
-        "task": TASK_REGRESSORS,
-        "prod_llm": ["prod_lexical_emb"],
-        "comp_llm": ["comp_lexical_emb"],
-    },
-    "static": {
-        "task": TASK_REGRESSORS,
-        "prod_llm": ["prod_lexical_emb"],
-        "comp_llm": ["comp_lexical_emb"],
-    },
-    "contextual": {
-        "task": TASK_REGRESSORS,
-        "prod_llm": ["prod_lexical_emb"],
-        "comp_llm": ["comp_lexical_emb"],
-    },
-    "joint": {
-        "task": TASK_REGRESSORS,
-        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
-        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
-        "prod_semantic": ["prod_lexical_emb"],
-        "comp_semantic": ["comp_lexical_emb"],
-    },
-    "joint_syntactic": {
-        "task": TASK_REGRESSORS,
-        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
-        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
-        "prod_llm": ["prod_lexical_emb"],
-        "comp_llm": ["comp_lexical_emb"],
-    },
-    "joint_nosplit": {
-        "task": [
+    "llm_nosplit": {
+        "word_stats": [
             "prod_screen",
             "comp_screen",
             "word_onset",
             "word_rate",
             "phoneme_rate",
         ],
+        "llm": ["lexical_emb"],
+    },
+    "joint_split": {
+        "task": ["prod_screen", "comp_screen"],
+        "word_stats": [
+            "prod_word_onset",
+            "prod_word_rate",
+            "prod_phoneme_rate",
+            "comp_word_onset",
+            "comp_word_rate",
+            "comp_phoneme_rate",
+        ],
+        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
+        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
+        "llm": ["prod_lexical_emb", "comp_lexical_emb"],
+    },
+    "joint_split_nollm": {
+        "task": ["prod_screen", "comp_screen"],
+        "word_stats": [
+            "prod_word_onset",
+            "prod_word_rate",
+            "prod_phoneme_rate",
+            "comp_word_onset",
+            "comp_word_rate",
+            "comp_phoneme_rate",
+        ],
+        "spectral": ["prod_spectral_emb", "comp_spectral_emb"],
+        "articulation": ["prod_phoneme_emb", "comp_phoneme_emb"],
+    },
+    "joint_nosplit": {
+        "task": ["prod_screen", "comp_screen"],
+        "word_stats": [
+            "word_onset",
+            "word_rate",
+            "phoneme_rate",
+        ],
         "spectral": ["spectral_emb"],
         "articulation": ["phoneme_emb"],
-        "semantic": ["lexical_emb"],
+        "llm": ["lexical_emb"],
     },
 }
 
@@ -142,6 +137,11 @@ class SplitDelayer(BaseEstimator, TransformerMixin):
 
 
 def get_regressors(sub_id: int, modelname: str, split: bool = True):
+    """
+    Will always return the following regressors:
+        ['word_onset', 'word_rate', 'phoneme_rate', 'phoneme_emb', 'lexical_emb', 'spectral_emb', 'prod_screen', 'comp_screen']
+    and split them into prod/comp if split=True (prod_screen and comp_screen are always split).
+    """
     conv = get_conv(sub_id)
     dfemb = get_transcript_features(sub_id, modelname=modelname)
     dfphone = get_transcript_features(sub_id, modelname="articulatory")
@@ -237,6 +237,7 @@ def get_regressors(sub_id: int, modelname: str, split: bool = True):
 def build_regressors(
     subject: int, modelname: str, spaces: dict = None, split: bool = True
 ):
+    """Bundle regressors into feature spaces for banded ridge regression."""
     regressors = get_regressors(subject, modelname, split=split)
 
     X = []
@@ -272,19 +273,15 @@ def build_model(
 
     # Set up modeling pipeline
     default_pipeline = make_pipeline(
-        StandardScaler(with_mean=True, with_std=False),
-        SplitDelayer(delays=[2, 3, 4, 5]),
+        StandardScaler(with_mean=True, with_std=True),
+        SplitDelayer(delays=[0, 1, 2, 3, 4, 5]),
         Kernelizer(kernel="linear"),
     )
     task_pipeline = make_pipeline(
-        SplitDelayer(delays=[2, 3, 4, 5]),
+        SplitDelayer(delays=[0, 1, 2, 3, 4, 5]),
         Kernelizer(kernel="linear"),
     )
-    motion_pipeline = make_pipeline(
-        StandardScaler(with_mean=True, with_std=False),
-        Kernelizer(kernel="linear"),
-    )
-    space2pipe = {"task": task_pipeline, "motion": motion_pipeline}
+    space2pipe = {"task": task_pipeline}
 
     # Make kernelizer
     kernelizers_tuples = [
@@ -324,10 +321,13 @@ def encoding(
     feature_names = list(features.keys())
     slices = list(features.values())
 
-    delayer = SplitDelayer(delays=[2, 3, 4, 5])
+    delayer = SplitDelayer(delays=[0, 1, 2, 3, 4, 5])
     pipeline = build_model(feature_names, slices, alphas, verbose, n_jobs)
 
     Y_bold = get_bold(sub_id, cache=cache)
+
+    # glasser = Atlas.glasser2016()
+    # Y_bold = glasser.vox_to_parc(Y_bold)
 
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
@@ -345,26 +345,43 @@ def encoding(
             Y_test.shape,
         )
 
-        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
-        pipeline.fit(X_train, Y_train)
-
-        Y_preds = pipeline.predict(X_test, split=True)
-        scores_split = correlation_score_split(Y_test, Y_preds)
-
-        # Compute correlation based on masked prod/comp
-        # 1 index may change below depending on features
+        # define prod/comp TR masks
         prod_mask = X_test[:, 0:1]
         prod_mask = delayer.fit_transform(prod_mask).any(-1)
-        comp_mask = np.logical_not(prod_mask)
+        comp_mask = X_test[:, 1:2]
+        comp_mask = delayer.fit_transform(comp_mask).any(-1)
+        results["cv_prod_mask"].append(prod_mask)
+        results["cv_comp_mask"].append(comp_mask)
 
+        # Fit model and generate predictions
+        pipeline["multiplekernelridgecv"].cv = PredefinedSplit(run_ids[train_index])  # type: ignore
+        pipeline.fit(X_train, Y_train)
+        Y_preds = pipeline.predict(X_test, split=True)
+
+        # inclusive model evaluation
         scores_prod = correlation_score_split(
             Y_test[prod_mask], Y_preds[:, prod_mask, :]
         )
         scores_comp = correlation_score_split(
             Y_test[comp_mask], Y_preds[:, comp_mask, :]
         )
+        results["cv_scores_prod"].append(scores_prod.numpy(force=True))
+        results["cv_scores_comp"].append(scores_comp.numpy(force=True))
+
+        # exclusive model evaluation
+        prod_only_mask = prod_mask & ~comp_mask
+        comp_only_mask = comp_mask & ~prod_mask
+        scores_prod = correlation_score_split(
+            Y_test[prod_only_mask], Y_preds[:, prod_only_mask, :]
+        )
+        scores_comp = correlation_score_split(
+            Y_test[comp_only_mask], Y_preds[:, comp_only_mask, :]
+        )
+        results["cv_scores_prod_exclusive"].append(scores_prod.numpy(force=True))
+        results["cv_scores_comp_exclusive"].append(scores_comp.numpy(force=True))
 
         enc_model = pipeline["multiplekernelridgecv"]  # type: ignore
+        results["cv_alphas"].append(enc_model.best_alphas_.numpy(force=True))
         if save_weights:
             Xfit = pipeline["columnkernelizer"].get_X_fit()
             weights = enc_model.get_primal_coef(Xfit)
@@ -381,12 +398,6 @@ def encoding(
 
             results["cv_weights_prod"].append(weights_prod)
             results["cv_weights_comp"].append(weights_comp)
-
-        results["cv_scores"].append(scores_split.numpy(force=True))
-        results["cv_scores_prod"].append(scores_prod.numpy(force=True))
-        results["cv_scores_comp"].append(scores_comp.numpy(force=True))
-        results["cv_alphas"].append(enc_model.best_alphas_.numpy(force=True))
-        results["cv_prodmask"].append(prod_mask)
 
         if save_preds:
             results["cv_preds"].append(Y_preds.numpy(force=True))
@@ -407,7 +418,6 @@ def main(subject: list[int], model: str, cache: str, suffix: str, cuda: int, **k
         print(datetime.now(), "Start", sub_id)
         result = encoding(sub_id, space=model, cache=cache, **kwargs)
 
-        print(datetime.now(), "Saving", sub_id)
         desc = None
         # desc = "folds-2"
         pklpath = Path(
@@ -426,7 +436,7 @@ def main(subject: list[int], model: str, cache: str, suffix: str, cuda: int, **k
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("-s", "--subject", nargs="+", type=int)
-    parser.add_argument("-m", "--model", type=str, default="joint")
+    parser.add_argument("-m", "--model", type=str, default="joint_split")
     parser.add_argument(
         "-lm", "--lang-model", type=str, default="model-gpt2-2b_layer-24"
     )
@@ -438,13 +448,13 @@ if __name__ == "__main__":
     parser.add_argument("--save-preds", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     _args = parser.parse_args()
-    _args.alphas = np.logspace(0, 19, 20)
+    _args.alphas = np.logspace(0, 12, 13)
 
     if task_id := os.environ.get("SLURM_ARRAY_TASK_ID"):
         portion = int(task_id) - 1
         subject_chunks = np.array_split(np.array(SUBS_STRANGERS), 4)
         subject_subset = subject_chunks[portion]
-        print("Using SLRUM ID", task_id, subject_subset)
+        print("\nUsing SLRUM ID", task_id, subject_subset)
         _args.subject = subject_subset
 
     main(**vars(_args))
