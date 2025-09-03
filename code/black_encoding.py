@@ -17,8 +17,7 @@ from clean import DEFAULT_CONFOUND_MODEL
 from constants import PUNCTUATION, SUBS_STRANGERS, TR
 from embeddings import HFMODELS
 from himalaya.backend import set_backend
-from himalaya.kernel_ridge import (ColumnKernelizer, Kernelizer,
-                                   MultipleKernelRidgeCV)
+from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score_split
 from nilearn import signal
 from nltk.corpus import cmudict
@@ -591,11 +590,9 @@ def encoding_story_to_conv(
     for sub in tqdm(subs):
 
         Y_bold = get_bold(sub)
-        # NOTE
-        spaces = encoding.SPACES["joint_nosplit"]
-        # spaces = encoding.SPACES["llm_nosplit"]
+        spaces = encoding.SPACES["joint_nosplit"]  # NOTE hardcoded
         conv_X, _ = encoding.build_regressors(sub, datatype, spaces=spaces, split=False)
-        conv_bold = subject.get_bold(sub, cache="default_task")
+        conv_bold = subject.get_bold(sub, cache="default_task")  # NOTE hardcoded
 
         print(
             datetime.now(),
@@ -606,60 +603,53 @@ def encoding_story_to_conv(
             conv_bold.shape,
         )
 
-        # fit on story
+        # fit on story and test on conversation
         pipeline.fit(X, Y_bold)
-        # test on conversation
-        Y_preds = pipeline.predict(conv_X[:, 2:], split=True)
-
-        prod_mask = conv_X[:, 0:1]
-        comp_mask = conv_X[:, 1:2]
-
-        # inclusive scoring
-        prod_mask = delayer.fit_transform(prod_mask).any(-1)
-        comp_mask = delayer.fit_transform(comp_mask).any(-1)
-        scores_prod = correlation_score_split(
-            conv_bold[prod_mask], Y_preds[:, prod_mask, :]
-        )
-        scores_comp = correlation_score_split(
-            conv_bold[comp_mask], Y_preds[:, comp_mask, :]
-        )
 
         results = dict()
-        results["cv_scores_prod"] = scores_prod.numpy(force=True)
-        results["cv_scores_comp"] = scores_comp.numpy(force=True)
+        test_index = np.arange(480, 1200)
+
+        conv_X_fold = conv_X[test_index]
+        conv_Y_fold = conv_bold[test_index]
+
+        Y_preds = pipeline.predict(conv_X_fold[:, 2:], split=True)
         results["cv_preds"] = Y_preds.numpy(force=True)
 
-        # exclusive
+        prod_mask = conv_X_fold[:, 0:1]
+        comp_mask = conv_X_fold[:, 1:2]
+        prod_mask = delayer.fit_transform(prod_mask).any(-1)
+        comp_mask = delayer.fit_transform(comp_mask).any(-1)
         prod_only_mask = prod_mask & ~comp_mask
         comp_only_mask = comp_mask & ~prod_mask
+
         scores_prod = correlation_score_split(
-            conv_bold[prod_only_mask], Y_preds[:, prod_only_mask, :]
+            conv_Y_fold[prod_only_mask], Y_preds[:, prod_only_mask, :]
         )
         scores_comp = correlation_score_split(
-            conv_bold[comp_only_mask], Y_preds[:, comp_only_mask, :]
+            conv_Y_fold[comp_only_mask], Y_preds[:, comp_only_mask, :]
         )
         results["cv_scores_prod_exclusive"] = scores_prod.numpy(force=True)
         results["cv_scores_comp_exclusive"] = scores_comp.numpy(force=True)
 
-        # encoding within black story
-        cv_results = defaultdict(list)
-        kfold = KFold(n_splits=2)
-        for train_index, test_index in kfold.split(X):
-            X_train, X_test = X[train_index], X[test_index]
-            Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
-            pipeline.fit(X_train, Y_train)
-            Y_preds = pipeline.predict(X_test, split=True)
-            scores_split = correlation_score_split(Y_test, Y_preds)
-            cv_results["black_cv_scores"].append(scores_split.numpy(force=True))
-            cv_results["black_cv_preds"].append(Y_preds.numpy(force=True))
-        for k, v in cv_results.items():
-            results[k] = np.stack(v)
+        # # encoding within black story
+        # cv_results = defaultdict(list)
+        # kfold = KFold(n_splits=2)
+        # for train_index, test_index in kfold.split(X):
+        #     X_train, X_test = X[train_index], X[test_index]
+        #     Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
+        #     pipeline.fit(X_train, Y_train)
+        #     Y_preds = pipeline.predict(X_test, split=True)
+        #     scores_split = correlation_score_split(Y_test, Y_preds)
+        #     cv_results["black_cv_scores"].append(scores_split.numpy(force=True))
+        #     cv_results["black_cv_preds"].append(Y_preds.numpy(force=True))
+        # for k, v in cv_results.items():
+        #     results[k] = np.stack(v)
 
         # save
         pklpath = Path(
-            root="results/encoding_black",
+            root="results/encoding_black_default_task",
             sub=f"{sub:03d}",
-            datatype=model,
+            datatype="joint_nosplit",
             ext=".hdf5",
         )
         pklpath.mkdirs()

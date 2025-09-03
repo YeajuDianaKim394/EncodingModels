@@ -1,6 +1,4 @@
-"""
-
-"""
+""" """
 
 from glob import glob
 
@@ -11,7 +9,6 @@ from constants import (
     CONVS_FRIENDS,
     CONVS_STRANGERS,
     FNKEYS,
-    MOTION_CONFOUNDS,
     PUNCTUATION,
     RUN_TRIAL_SLICE,
     RUNS,
@@ -37,7 +34,7 @@ def confounds(args):
         ext=".tsv",
     )
 
-    confounds = MOTION_CONFOUNDS
+    confounds = []  # NOTE removed this constant
     print(len(confounds))
 
     outpath = Path(
@@ -278,6 +275,32 @@ def spacy_vectors(args):
         df.to_pickle(transpath)
 
 
+def bag_of_words(args):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    # Look for transcripts
+
+    for conv in tqdm(CONVS_STRANGERS):
+        transcripts = f"data/stimuli/conv-{conv}/whisperx/*.csv"
+        files = glob(transcripts)
+        assert len(files), "No files found for: " + transcripts
+
+        dfs = [pd.read_csv(filename) for filename in files]
+        all_words = sum([df["word"].to_list() for df in dfs], [])
+        vectorizer = TfidfVectorizer().fit(all_words)
+
+        for filename in files:
+            transcript_df = pd.read_csv(filename)
+            vectors = vectorizer.transform(transcript_df["word"].to_list())
+            vectors = vectors.toarray()
+            transcript_df["embedding"] = vectors.tolist()
+
+            transpath = Path.frompath(filename)
+            transpath.update(root="data/stimuli", datatype="bow", ext=".pkl")
+            transpath.mkdirs()
+            transcript_df.to_pickle(transpath)
+
+
 def wordnet(args):
     """
     https://github.com/nlx-group/WordNetEmbeddings?tab=readme-ov-file
@@ -412,5 +435,7 @@ if __name__ == "__main__":
         syntactic(args)
     elif args.feature == "spacy":
         spacy_vectors(args)
+    elif args.feature == "bow":
+        bag_of_words(args)
     else:
         raise ValueError(f"Unknown feature set: {args.feature}")

@@ -1,5 +1,4 @@
-"""Utilities to make the plotting life easier
-"""
+"""Utilities to make the plotting life easier"""
 
 import matplotlib as mpl
 import matplotlib.colors as mcolors
@@ -130,6 +129,7 @@ def surface_plot(
     transform: str = None,
     atlas: Atlas = None,
     atlas_mode: str = "outline",
+    atlas_cmap: str = "gray",
     fig=None,
     ax=None,
     zeroNan=True,
@@ -182,7 +182,7 @@ def surface_plot(
             gifR = GiftiImage(darrays=(GiftiDataArray(parc_mask[n_verts:]),))
             gifL, gifR = fsaverage_to_fslr((gifL, gifR), method="nearest")
             parc_mask = {"left": gifL, "right": gifR}
-        p.add_layer(parc_mask, cmap="gray", as_outline=True, cbar=False)
+        p.add_layer(parc_mask, cmap=atlas_cmap, as_outline=True, cbar=False)
 
     if fig is None and ax is None:
         fig = p.build()

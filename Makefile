@@ -47,12 +47,13 @@ llm_embeddings:
 	# python code/embeddings.py -m gpt2-2b --layer 0
 
 generate_features:
-	python code/feature_gen.py spectral
-	python code/feature_gen.py articulatory
-	python code/feature_gen.py syntactic
+	python code/featuregen.py spectral
+	python code/featuregen.py articulatory
+	python code/featuregen.py syntactic
+	python code/featuregen.py bow
 
 confound_regression:
-	python code/clean.py -m default_task_trial
+	python code/clean.py -m default_task
 
 black_llm:
 	python code/black_encoding.py -m gpt2-xl --extract-only 
@@ -60,7 +61,12 @@ black_llm:
 encoding:
 	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
 		code/slurm.sh -- \
-    	code/encoding.py -m llm_split --lang-model model-gpt2-2b_layer-24 --cache default_task_trial --save-preds
+    	code/encoding.py -m joint_split --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds
+
+encoding_bow:
+	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
+		code/slurm.sh -- \
+    	code/encoding.py -m joint_split --lang-model bow --cache default_task --save-preds
 
 encoding_nollm:
 	sbatch --job-name=enc --mem=8G --time=01:10:00 --gres=gpu:1 --array=1-4 \
@@ -80,20 +86,12 @@ encoding_nosplit:
 		code/slurm.sh -- \
     	code/encoding.py -m joint_nosplit --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds 
 
-# TODO pass in number of folds
 encoding_2fold:
-	sbatch --job-name=enc --mem=16G --time=01:10:00 --gres=gpu:1 --array=1,2 \
+	sbatch --job-name=enc2 --mem=16G --time=00:10:00 --gres=gpu:1 --array=1-4 \
 		code/slurm.sh -- \
-    	code/encoding.py -m joint_split --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds  --suffix _n2 --save-weights
+    	code/encoding.py -m joint_split --lang-model model-gpt2-2b_layer-24 --cache default_task --save-preds --suffix _n2
 
 encoding_black2conv:
-	sbatch --job-name=enc_b2c --mem=6G --time=01:10:00 --gres=gpu:1 \
+	sbatch --job-name=b2c --mem=6G --time=00:30:00 --gres=gpu:1 \
 		code/slurm.sh -- \
-	code/black_encoding.py -m contextual
-
-
-# space=syntactic
-# modelname=syntactic
-
-# space=static
-# modelname=model-gpt2-2b_layer-0
+		code/black_encoding.py

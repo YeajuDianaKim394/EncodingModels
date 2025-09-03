@@ -19,7 +19,7 @@ from himalaya.backend import set_backend
 from himalaya.kernel_ridge import ColumnKernelizer, Kernelizer, MultipleKernelRidgeCV
 from himalaya.scoring import correlation_score_split
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import KFold, PredefinedSplit
+from sklearn.model_selection import PredefinedSplit
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from util.path import Path
@@ -332,7 +332,8 @@ def encoding(
     results = defaultdict(list)
     run_ids = np.repeat(RUNS, CONV_TRS * 2)
     kfold = PredefinedSplit(run_ids)
-    # kfold = KFold(n_splits=2)  # NOTE override
+    # train on just 2 runs and test on 3 (to compare with story):
+    # kfold = PredefinedSplit(np.array([-1] * 480 + [0] * (1200 - 480)))
     for k, (train_index, test_index) in enumerate(kfold.split(X)):
         X_train, X_test = X[train_index], X[test_index]
         Y_train, Y_test = Y_bold[train_index], Y_bold[test_index]
@@ -418,8 +419,7 @@ def main(subject: list[int], model: str, cache: str, suffix: str, cuda: int, **k
         print(datetime.now(), "Start", sub_id)
         result = encoding(sub_id, space=model, cache=cache, **kwargs)
 
-        desc = None
-        # desc = "folds-2"
+        desc = kwargs.get("lang_model")
         pklpath = Path(
             root=f"results/encoding_{cache}{suffix}",
             sub=f"{sub_id:03d}",
